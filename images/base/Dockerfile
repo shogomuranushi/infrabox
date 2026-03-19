@@ -4,12 +4,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-server sudo curl wget git vim nano \
     build-essential python3 python3-pip \
     nodejs npm jq unzip htop tmux \
+    ripgrep fd-find fzf zsh \
   && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+  && apt-get update && apt-get install -y --no-install-recommends gh \
+  && rm -rf /var/lib/apt/lists/*
+
+# uv (Python package manager)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+  && mv /root/.local/bin/uv /usr/local/bin/uv \
+  && mv /root/.local/bin/uvx /usr/local/bin/uvx
+
+# Claude Code & Codex
+RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
 # SSH server setup
 RUN mkdir -p /var/run/sshd \
-  && (id ubuntu &>/dev/null || useradd -m -s /bin/bash ubuntu) \
-  && usermod -s /bin/bash ubuntu \
+  && (id ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu) \
+  && usermod -s /bin/zsh ubuntu \
   && echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 EXPOSE 22 8000
