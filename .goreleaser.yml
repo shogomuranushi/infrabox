@@ -3,8 +3,8 @@ project_name: ib
 
 before:
   hooks:
-    - go mod tidy
-  working_directory: cli
+    - cmd: go mod tidy
+      dir: cli
 
 builds:
   - id: ib
