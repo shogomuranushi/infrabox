@@ -9,6 +9,12 @@ kind: ClusterRole
 metadata:
   name: infrabox-api
 rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["resourcequotas"]
+    verbs: ["create", "get", "list", "update", "patch"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["create", "get", "list", "delete", "patch", "update"]

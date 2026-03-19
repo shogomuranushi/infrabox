@@ -80,10 +80,22 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	vmNamespace := k8sclient.UserNamespace(h.cfg.VMNamespace, user)
+
+	// Ensure per-user namespace and ResourceQuota exist
+	if user != "" {
+		if err := h.k8s.EnsureUserNamespace(r.Context(), vmNamespace, h.cfg.UserCPUQuota, h.cfg.UserMemoryQuota); err != nil {
+			log.Printf("ERROR ensuring namespace %s: %v", vmNamespace, err)
+			jsonError(w, fmt.Sprintf("namespace error: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	vm := &db.VM{
 		ID:        uuid.NewString(),
 		Name:      req.Name,
 		Owner:     user,
+		Namespace: vmNamespace,
 		State:     "creating",
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -96,7 +108,7 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	ingressHost := h.ingressHost(req.Name)
 	k8sCfg := k8sclient.VMConfig{
 		Name:               req.Name,
-		Namespace:          h.cfg.VMNamespace,
+		Namespace:          vmNamespace,
 		SSHPiperNamespace:  h.cfg.SSHPiperNamespace,
 		StorageClass:       h.cfg.StorageClass,
 		BaseImage:          h.cfg.BaseImage,
@@ -105,6 +117,7 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		UserPubKey:         req.PubKey,
 		UpstreamSecretName: h.cfg.UpstreamSecretName,
 		AuthURL:            h.cfg.AuthURL,
+		Owner:              user,
 	}
 
 	if err := h.k8s.CreateVM(r.Context(), k8sCfg); err != nil {
@@ -114,8 +127,8 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wait for Pod to be ready (30s timeout)
-	if err := h.k8s.WaitForPodReady(r.Context(), h.cfg.VMNamespace, req.Name, 60); err != nil {
+	// Wait for Pod to be ready (60s timeout)
+	if err := h.k8s.WaitForPodReady(r.Context(), vmNamespace, req.Name, 60); err != nil {
 		log.Printf("WARN: pod not ready for %s: %v", req.Name, err)
 	}
 
@@ -163,7 +176,11 @@ func (h *Handler) DeleteVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.k8s.DeleteVM(r.Context(), h.cfg.VMNamespace, h.cfg.SSHPiperNamespace, name); err != nil {
+	vmNamespace := vm.Namespace
+	if vmNamespace == "" {
+		vmNamespace = h.cfg.VMNamespace // fallback for pre-migration VMs
+	}
+	if err := h.k8s.DeleteVM(r.Context(), vmNamespace, h.cfg.SSHPiperNamespace, name); err != nil {
 		log.Printf("WARN: DeleteVM k8s error for %s: %v", name, err)
 	}
 	h.db.DeleteVM(name)
@@ -179,7 +196,11 @@ func (h *Handler) RestartVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.k8s.RestartVM(r.Context(), h.cfg.VMNamespace, name); err != nil {
+	vmNamespace := vm.Namespace
+	if vmNamespace == "" {
+		vmNamespace = h.cfg.VMNamespace
+	}
+	if err := h.k8s.RestartVM(r.Context(), vmNamespace, name); err != nil {
 		jsonError(w, fmt.Sprintf("restart failed: %v", err), http.StatusInternalServerError)
 		return
 	}
