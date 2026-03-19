@@ -14,9 +14,17 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Set up API key for first-time use",
 	Run: func(cmd *cobra.Command, args []string) {
+		reader := bufio.NewReader(os.Stdin)
+
 		if cfg.Endpoint == "" {
-			fmt.Fprintln(os.Stderr, "ERROR: endpoint is not configured")
-			os.Exit(1)
+			fmt.Print("Enter InfraBox API endpoint (e.g. https://api.example.com): ")
+			ep, _ := reader.ReadString('\n')
+			ep = strings.TrimSpace(ep)
+			if ep == "" {
+				fmt.Fprintln(os.Stderr, "ERROR: endpoint is required")
+				os.Exit(1)
+			}
+			cfg.Endpoint = ep
 		}
 
 		keysURL := strings.TrimRight(cfg.Endpoint, "/") + "/v1/keys"
@@ -27,7 +35,6 @@ var initCmd = &cobra.Command{
 		fmt.Printf("  3. Copy the \"api_key\" value from the response\n\n")
 		fmt.Print("Paste your API key: ")
 
-		reader := bufio.NewReader(os.Stdin)
 		key, _ := reader.ReadString('\n')
 		key = strings.TrimSpace(key)
 
