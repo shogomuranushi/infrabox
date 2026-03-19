@@ -33,6 +33,58 @@ type VMConfig struct {
 	UserPubKey         string
 	UpstreamSecretName string
 	AuthURL            string // e.g. "https://auth.infrabox.abejatech.com" - if set, adds oauth2-proxy auth annotations
+	Owner              string // user who owns this VM
+}
+
+// UserNamespace returns the per-user namespace name.
+func UserNamespace(baseNamespace, owner string) string {
+	if owner == "" {
+		return baseNamespace
+	}
+	return baseNamespace + "-" + owner
+}
+
+// EnsureUserNamespace creates the per-user namespace and ResourceQuota if they don't exist.
+func (c *Client) EnsureUserNamespace(ctx context.Context, namespace, cpuQuota, memoryQuota string) error {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+			Labels: map[string]string{
+				"managed-by": "infrabox",
+			},
+		},
+	}
+	_, err := c.Clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return fmt.Errorf("create namespace %s: %w", namespace, err)
+	}
+
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "user-quota",
+			Namespace: namespace,
+			Labels: map[string]string{
+				"managed-by": "infrabox",
+			},
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				"requests.cpu":    resource.MustParse(cpuQuota),
+				"requests.memory": resource.MustParse(memoryQuota),
+			},
+		},
+	}
+	_, err = c.Clientset.CoreV1().ResourceQuotas(namespace).Create(ctx, quota, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return fmt.Errorf("create resource quota in %s: %w", namespace, err)
+	}
+	if errors.IsAlreadyExists(err) {
+		_, err = c.Clientset.CoreV1().ResourceQuotas(namespace).Update(ctx, quota, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("update resource quota in %s: %w", namespace, err)
+		}
+	}
+	return nil
 }
 
 // CreateVM creates all K8s resources for a VM.
@@ -122,13 +174,13 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vm-" + cfg.Name,
 			Namespace: cfg.Namespace,
-			Labels:    vmLabels(cfg.Name),
+			Labels:    vmLabels(cfg.Name, cfg.Owner),
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: pointer.Int32(1),
-			Selector: &metav1.LabelSelector{MatchLabels: vmLabels(cfg.Name)},
+			Selector: &metav1.LabelSelector{MatchLabels: vmLabels(cfg.Name, cfg.Owner)},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: vmLabels(cfg.Name)},
+				ObjectMeta: metav1.ObjectMeta{Labels: vmLabels(cfg.Name, cfg.Owner)},
 				Spec: corev1.PodSpec{
 					// initContainer: PVCマウント後のパーミッション修正とupstream公開鍵の設定
 					InitContainers: []corev1.Container{
@@ -150,12 +202,12 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 							},
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("100m"),
-								corev1.ResourceMemory: resource.MustParse("256Mi"),
+								corev1.ResourceCPU:    resource.MustParse("200m"),
+								corev1.ResourceMemory: resource.MustParse("800Mi"),
 							},
 							Limits: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("2000m"),
-								corev1.ResourceMemory: resource.MustParse("8Gi"),
+								corev1.ResourceCPU:    resource.MustParse("1000m"),
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
 							},
 						},
 						},
@@ -174,12 +226,12 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 							},
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("100m"),
-								corev1.ResourceMemory: resource.MustParse("256Mi"),
+								corev1.ResourceCPU:    resource.MustParse("200m"),
+								corev1.ResourceMemory: resource.MustParse("800Mi"),
 							},
 							Limits: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("2000m"),
-								corev1.ResourceMemory: resource.MustParse("8Gi"),
+								corev1.ResourceCPU:    resource.MustParse("1000m"),
+								corev1.ResourceMemory: resource.MustParse("2Gi"),
 							},
 						},
 						},
@@ -211,12 +263,12 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 }
 
 func (c *Client) createPVC(ctx context.Context, cfg VMConfig) error {
-	storageSize, _ := resource.ParseQuantity("20Gi")
+	storageSize, _ := resource.ParseQuantity("8Gi")
 	_, err := c.Clientset.CoreV1().PersistentVolumeClaims(cfg.Namespace).Create(ctx, &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pvc-" + cfg.Name,
 			Namespace: cfg.Namespace,
-			Labels:    vmLabels(cfg.Name),
+			Labels:    vmLabels(cfg.Name, cfg.Owner),
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			StorageClassName: &cfg.StorageClass,
@@ -236,10 +288,10 @@ func (c *Client) createService(ctx context.Context, cfg VMConfig) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vm-" + cfg.Name + "-svc",
 			Namespace: cfg.Namespace,
-			Labels:    vmLabels(cfg.Name),
+			Labels:    vmLabels(cfg.Name, cfg.Owner),
 		},
 		Spec: corev1.ServiceSpec{
-			Selector: vmLabels(cfg.Name),
+			Selector: vmLabels(cfg.Name, cfg.Owner),
 			Ports: []corev1.ServicePort{
 				{Name: "ssh", Port: 22, TargetPort: intstr.FromInt(22)},
 				{Name: "http", Port: 8000, TargetPort: intstr.FromInt(8000)},
@@ -255,7 +307,7 @@ func (c *Client) createIngress(ctx context.Context, cfg VMConfig) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vm-" + cfg.Name + "-ingress",
 			Namespace: cfg.Namespace,
-			Labels:    vmLabels(cfg.Name),
+			Labels:    vmLabels(cfg.Name, cfg.Owner),
 			Annotations: ingressAnnotations(cfg),
 		},
 		Spec: networkingv1.IngressSpec{
@@ -340,8 +392,12 @@ func (c *Client) deletePipe(ctx context.Context, namespace, name string) {
 	c.DynamicClient.Resource(pipeGVR).Namespace(namespace).Delete(ctx, "vm-"+name, metav1.DeleteOptions{})
 }
 
-func vmLabels(name string) map[string]string {
-	return map[string]string{"app": "vm-" + name, "managed-by": "infrabox"}
+func vmLabels(name string, owner string) map[string]string {
+	labels := map[string]string{"app": "vm-" + name, "managed-by": "infrabox"}
+	if owner != "" {
+		labels["infrabox-owner"] = owner
+	}
+	return labels
 }
 
 func ingressAnnotations(cfg VMConfig) map[string]string {
