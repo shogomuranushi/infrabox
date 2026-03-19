@@ -12,6 +12,7 @@ import (
 // ビルド時に -ldflags で埋め込む
 var defaultEndpoint string
 var defaultSSHPiperIP string
+var Version = "dev"
 
 type Config struct {
 	Endpoint   string `yaml:"endpoint"`
@@ -33,8 +34,8 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(loadConfig)
-	rootCmd.AddCommand(newCmd, listCmd, deleteCmd, sshCmd, restartCmd, initCmd)
+	cobra.OnInitialize(loadConfig, checkUpdateBackground)
+	rootCmd.AddCommand(newCmd, listCmd, deleteCmd, sshCmd, restartCmd, initCmd, upgradeCmd)
 }
 
 func loadConfig() {
