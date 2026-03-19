@@ -27,7 +27,7 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
-		APIKey:             getEnv("INFRABOX_API_KEY", "changeme"),
+		APIKey:             getEnv("INFRABOX_API_KEY", ""),
 		DBPath:             getEnv("INFRABOX_DB_PATH", "/data/infrabox.db"),
 		VMNamespace:        getEnv("INFRABOX_VM_NAMESPACE", "infrabox-vms"),
 		SSHPiperNamespace:  getEnv("INFRABOX_SSHPIPER_NS", "infrabox"),

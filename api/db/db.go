@@ -1,11 +1,19 @@
 package db
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"fmt"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+func hashString(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
 
 type VM struct {
 	ID        string
@@ -56,7 +64,19 @@ func (d *DB) migrate() error {
 	}
 	// Add namespace column for existing databases
 	d.conn.Exec(`ALTER TABLE vms ADD COLUMN namespace TEXT NOT NULL DEFAULT ''`)
-	return nil
+
+	// Invitation codes table
+	_, err = d.conn.Exec(`
+		CREATE TABLE IF NOT EXISTS invitation_codes (
+			id         TEXT PRIMARY KEY,
+			code_hash  TEXT NOT NULL UNIQUE,
+			used       INTEGER NOT NULL DEFAULT 0,
+			used_by    TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			used_at    DATETIME
+		);
+	`)
+	return err
 }
 
 type Key struct {
@@ -64,6 +84,15 @@ type Key struct {
 	Name      string
 	APIKey    string
 	CreatedAt time.Time
+}
+
+type InvitationCode struct {
+	ID        string
+	CodeHash  string // SHA-256 hash of the code
+	Used      bool
+	UsedBy    string // name of user who redeemed
+	CreatedAt time.Time
+	UsedAt    *time.Time
 }
 
 func (d *DB) InsertKey(k *Key) error {
@@ -154,10 +183,62 @@ func (d *DB) ListVMs(owner string) ([]*VM, error) {
 	return vms, rows.Err()
 }
 
-func (d *DB) DeleteVM(name string) error {
+// InsertInvitationCode stores a new invitation code (hashed).
+func (d *DB) InsertInvitationCode(ic *InvitationCode) error {
 	_, err := d.conn.Exec(
-		`UPDATE vms SET state = 'deleted', updated_at = ? WHERE name = ?`,
-		time.Now(), name,
+		`INSERT INTO invitation_codes (id, code_hash, used, used_by, created_at) VALUES (?, ?, 0, '', ?)`,
+		ic.ID, ic.CodeHash, ic.CreatedAt,
 	)
+	return err
+}
+
+// RedeemInvitationCode atomically marks an invitation code as used.
+// Returns an error if the code is invalid or already used.
+func (d *DB) RedeemInvitationCode(rawCode string) error {
+	h := hashString(rawCode)
+	res, err := d.conn.Exec(
+		`UPDATE invitation_codes SET used = 1, used_at = ? WHERE code_hash = ? AND used = 0`,
+		time.Now(), h,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("invalid or already used invitation code")
+	}
+	return nil
+}
+
+// ListInvitationCodes returns all invitation codes (for admin).
+func (d *DB) ListInvitationCodes() ([]*InvitationCode, error) {
+	rows, err := d.conn.Query(
+		`SELECT id, code_hash, used, used_by, created_at, used_at FROM invitation_codes ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var codes []*InvitationCode
+	for rows.Next() {
+		ic := &InvitationCode{}
+		if err := rows.Scan(&ic.ID, &ic.CodeHash, &ic.Used, &ic.UsedBy, &ic.CreatedAt, &ic.UsedAt); err != nil {
+			return nil, err
+		}
+		codes = append(codes, ic)
+	}
+	return codes, rows.Err()
+}
+
+// DeleteVM soft-deletes a VM. If owner is non-empty, only the owner's VM is affected.
+func (d *DB) DeleteVM(name, owner string) error {
+	query := `UPDATE vms SET state = 'deleted', updated_at = ? WHERE name = ? AND state != 'deleted'`
+	args := []interface{}{time.Now(), name}
+	if owner != "" {
+		query += ` AND owner = ?`
+		args = append(args, owner)
+	}
+	_, err := d.conn.Exec(query, args...)
 	return err
 }
