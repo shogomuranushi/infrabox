@@ -1,0 +1,27 @@
+# HTTPS ingress for infrabox-api at api.<DOMAIN>
+# Handles all API traffic. TLS via cert-manager.
+# Placeholder: API_DOMAIN_PLACEHOLDER
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: infrabox-api
+  namespace: infrabox
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - API_DOMAIN_PLACEHOLDER
+      secretName: tls-infrabox-api
+  rules:
+    - host: API_DOMAIN_PLACEHOLDER
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: infrabox-api
+                port:
+                  number: 8080
