@@ -23,7 +23,7 @@ type InvitationCodeResponse struct {
 // CreateInvitationCode generates a new invitation code (admin only).
 // POST /v1/invitations
 func (h *Handler) CreateInvitationCode(w http.ResponseWriter, r *http.Request) {
-	if currentUser(r) != "" {
+	if !isAdmin(r) {
 		jsonError(w, "admin only", http.StatusForbidden)
 		return
 	}
@@ -58,7 +58,7 @@ func (h *Handler) CreateInvitationCode(w http.ResponseWriter, r *http.Request) {
 // ListInvitationCodes returns all invitation codes (admin only).
 // GET /v1/invitations
 func (h *Handler) ListInvitationCodes(w http.ResponseWriter, r *http.Request) {
-	if currentUser(r) != "" {
+	if !isAdmin(r) {
 		jsonError(w, "admin only", http.StatusForbidden)
 		return
 	}

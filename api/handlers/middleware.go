@@ -12,7 +12,8 @@ import (
 
 type contextKey string
 
-const ctxUser contextKey = "user"
+const ctxUser  contextKey = "user"
+const ctxAdmin contextKey = "admin"
 
 func APIKeyMiddleware(adminKey string, database *db.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -25,6 +26,7 @@ func APIKeyMiddleware(adminKey string, database *db.DB) func(http.Handler) http.
 			// Admin key: full access, no owner filter (constant-time compare)
 			if subtle.ConstantTimeCompare([]byte(key), []byte(adminKey)) == 1 {
 				ctx := context.WithValue(r.Context(), ctxUser, "")
+				ctx = context.WithValue(ctx, ctxAdmin, true)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -37,12 +39,20 @@ func APIKeyMiddleware(adminKey string, database *db.DB) func(http.Handler) http.
 				return
 			}
 			ctx := context.WithValue(r.Context(), ctxUser, k.Name)
+			ctx = context.WithValue(ctx, ctxAdmin, false)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-// currentUser returns the user name from context ("" = admin).
+// isAdmin returns true only when the request was authenticated with the admin API key.
+// If the middleware did not run (ctxAdmin not set), this returns false (fail-safe).
+func isAdmin(r *http.Request) bool {
+	v, ok := r.Context().Value(ctxAdmin).(bool)
+	return ok && v
+}
+
+// currentUser returns the user name from context.
 func currentUser(r *http.Request) string {
 	v, _ := r.Context().Value(ctxUser).(string)
 	return v
