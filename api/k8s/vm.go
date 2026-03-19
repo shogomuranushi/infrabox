@@ -34,6 +34,7 @@ type VMConfig struct {
 	UpstreamSecretName string
 	AuthURL            string // e.g. "https://auth.infrabox.example.com" - if set, adds oauth2-proxy auth annotations
 	Owner              string // user who owns this VM
+	NodeSelector       map[string]string // optional: schedule VM pods on specific nodes
 }
 
 // UserNamespace returns the per-user namespace name.
@@ -182,6 +183,7 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: vmLabels(cfg.Name, cfg.Owner)},
 				Spec: corev1.PodSpec{
+					NodeSelector: cfg.NodeSelector,
 					// initContainer: PVCマウント後のパーミッション修正とupstream公開鍵の設定
 					InitContainers: []corev1.Container{
 						{

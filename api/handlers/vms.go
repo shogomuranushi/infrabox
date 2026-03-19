@@ -118,6 +118,7 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		UpstreamSecretName: h.cfg.UpstreamSecretName,
 		AuthURL:            h.cfg.AuthURL,
 		Owner:              user,
+		NodeSelector:       h.cfg.VMNodeSelector,
 	}
 
 	if err := h.k8s.CreateVM(r.Context(), k8sCfg); err != nil {

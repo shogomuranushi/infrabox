@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -21,6 +22,7 @@ type Config struct {
 	MaxVMsPerUser      int
 	UserCPUQuota       string // ResourceQuota requests.cpu per user namespace (e.g. "2")
 	UserMemoryQuota    string // ResourceQuota requests.memory per user namespace (e.g. "8Gi")
+	VMNodeSelector     map[string]string // nodeSelector for VM pods (e.g. infrabox-role=vm-worker)
 }
 
 func Load() *Config {
@@ -40,6 +42,7 @@ func Load() *Config {
 		MaxVMsPerUser:      getEnvInt("INFRABOX_MAX_VMS_PER_USER", 10),
 		UserCPUQuota:       getEnv("INFRABOX_USER_CPU_QUOTA", "2"),
 		UserMemoryQuota:    getEnv("INFRABOX_USER_MEMORY_QUOTA", "8Gi"),
+		VMNodeSelector:     parseNodeSelector(getEnv("INFRABOX_VM_NODE_SELECTOR", "")),
 	}
 }
 
@@ -48,6 +51,24 @@ func getEnv(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+// parseNodeSelector parses "key1=val1,key2=val2" into a map.
+func parseNodeSelector(s string) map[string]string {
+	if s == "" {
+		return nil
+	}
+	m := make(map[string]string)
+	for _, pair := range strings.Split(s, ",") {
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) == 2 {
+			m[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+		}
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 func getEnvInt(key string, defaultVal int) int {
