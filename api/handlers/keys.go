@@ -45,7 +45,12 @@ func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing != nil {
-		jsonOK(w, map[string]string{"api_key": existing.APIKey, "name": existing.Name})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "api key already exists for this name",
+			"name":  existing.Name,
+		})
 		return
 	}
 
