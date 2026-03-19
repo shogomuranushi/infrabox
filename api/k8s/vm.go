@@ -148,6 +148,16 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 								{Name: "home", MountPath: "/home/ubuntu"},
 								{Name: "upstream-key", MountPath: "/run/secrets/upstream-key", ReadOnly: true},
 							},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("100m"),
+								corev1.ResourceMemory: resource.MustParse("256Mi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("2000m"),
+								corev1.ResourceMemory: resource.MustParse("8Gi"),
+							},
+						},
 						},
 					},
 					Containers: []corev1.Container{
@@ -162,6 +172,16 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "home", MountPath: "/home/ubuntu"},
 							},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("100m"),
+								corev1.ResourceMemory: resource.MustParse("256Mi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("2000m"),
+								corev1.ResourceMemory: resource.MustParse("8Gi"),
+							},
+						},
 						},
 					},
 					Volumes: []corev1.Volume{
