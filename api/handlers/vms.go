@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,6 +16,31 @@ import (
 	"github.com/shogomuranushi/infra-box/api/db"
 	k8sclient "github.com/shogomuranushi/infra-box/api/k8s"
 )
+
+var validKeyTypes = map[string]bool{
+	"ssh-rsa":             true,
+	"ssh-ed25519":         true,
+	"ecdsa-sha2-nistp256": true,
+	"ecdsa-sha2-nistp384": true,
+	"ecdsa-sha2-nistp521": true,
+	"sk-ssh-ed25519@openssh.com":         true,
+	"sk-ecdsa-sha2-nistp256@openssh.com": true,
+}
+
+// validateSSHPublicKey checks that the key looks like a valid SSH public key.
+func validateSSHPublicKey(pubKey string) error {
+	parts := strings.Fields(pubKey)
+	if len(parts) < 2 {
+		return fmt.Errorf("invalid SSH public key format")
+	}
+	if !validKeyTypes[parts[0]] {
+		return fmt.Errorf("unsupported key type: %s", parts[0])
+	}
+	if _, err := base64.StdEncoding.DecodeString(parts[1]); err != nil {
+		return fmt.Errorf("invalid base64 key data")
+	}
+	return nil
+}
 
 var validName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 
@@ -57,6 +83,10 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "pub_key is required", http.StatusBadRequest)
 		return
 	}
+	if err := validateSSHPublicKey(req.PubKey); err != nil {
+		jsonError(w, fmt.Sprintf("invalid pub_key: %v", err), http.StatusBadRequest)
+		return
+	}
 
 	user := currentUser(r)
 
@@ -86,7 +116,7 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	if user != "" {
 		if err := h.k8s.EnsureUserNamespace(r.Context(), vmNamespace, h.cfg.UserCPUQuota, h.cfg.UserMemoryQuota); err != nil {
 			log.Printf("ERROR ensuring namespace %s: %v", vmNamespace, err)
-			jsonError(w, fmt.Sprintf("namespace error: %v", err), http.StatusInternalServerError)
+			jsonError(w, "failed to prepare VM infrastructure", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -123,7 +153,7 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	if err := h.k8s.CreateVM(r.Context(), k8sCfg); err != nil {
 		log.Printf("ERROR creating VM %s: %v", req.Name, err)
 		h.db.UpdateVMState(req.Name, "error")
-		jsonError(w, fmt.Sprintf("k8s error: %v", err), http.StatusInternalServerError)
+		jsonError(w, "failed to create VM", http.StatusInternalServerError)
 		return
 	}
 
@@ -183,7 +213,7 @@ func (h *Handler) DeleteVM(w http.ResponseWriter, r *http.Request) {
 	if err := h.k8s.DeleteVM(r.Context(), vmNamespace, h.cfg.SSHPiperNamespace, name); err != nil {
 		log.Printf("WARN: DeleteVM k8s error for %s: %v", name, err)
 	}
-	h.db.DeleteVM(name)
+	h.db.DeleteVM(name, currentUser(r))
 
 	w.WriteHeader(http.StatusNoContent)
 }

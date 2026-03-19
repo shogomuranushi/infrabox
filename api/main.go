@@ -16,6 +16,10 @@ import (
 func main() {
 	cfg := config.Load()
 
+	if cfg.APIKey == "" {
+		log.Fatal("INFRABOX_API_KEY must be set")
+	}
+
 	// DB のディレクトリ作成
 	if err := os.MkdirAll("/data", 0755); err != nil {
 		log.Printf("WARN: cannot create /data: %v (using current dir)", err)
@@ -40,8 +44,11 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
+	// Rate limiter for key creation: 5 requests/minute per IP, burst of 3
+	keyRL := handlers.NewKeyRateLimiter()
+
 	r.Get("/healthz", h.HealthZ)
-	r.Post("/v1/keys", h.CreateKey)
+	r.With(keyRL.Middleware).Post("/v1/keys", h.CreateKey)
 
 	r.Group(func(r chi.Router) {
 		r.Use(handlers.APIKeyMiddleware(cfg.APIKey, database))
@@ -51,6 +58,10 @@ func main() {
 		r.Get("/v1/vms/{name}", h.GetVM)
 		r.Delete("/v1/vms/{name}", h.DeleteVM)
 		r.Post("/v1/vms/{name}/restart", h.RestartVM)
+
+		// Invitation codes (admin only)
+		r.Post("/v1/invitations", h.CreateInvitationCode)
+		r.Get("/v1/invitations", h.ListInvitationCodes)
 	})
 
 	addr := ":8080"
