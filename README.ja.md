@@ -115,11 +115,10 @@ curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/i
 
 バイナリを直接ダウンロードする場合は [Releases](https://github.com/shogomuranushi/infrabox/releases) から。
 
-### ログイン
+### セットアップ
 
 ```bash
-ib login   # ブラウザが開く → Google Workspace または Entra ID で認証
-ib whoami  # アカウントとクォータを確認
+ib init   # APIキーを入力 → SSHキーが ~/.ib/id_infrabox に自動生成される
 ```
 
 ### 最初のVMを作る
@@ -129,15 +128,17 @@ ib new my-app
 ```
 
 ```
-✓ 完了（7秒）
+✓ Ready (7s)
 
-  SSH:  ssh my-app.infra.example.com
-  URL:  https://my-app.infra.example.com  (private)
+  SSH:       ib ssh my-app
+  HTTPS URL: https://my-app.infra.example.com
+```
 
-  ヒント:
-    ib ssh my-app           — SSH 接続
-    ib open my-app          — ブラウザで開く
-    ib share public my-app  — チームに公開
+```bash
+ib ssh my-app    # VMにSSH接続
+ib list          # VM一覧
+ib delete my-app # VMを削除
+ib upgrade       # CLIを最新版に更新
 ```
 
 ---
