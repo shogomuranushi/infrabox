@@ -31,6 +31,7 @@ var sshCmd = &cobra.Command{
 		sshArgs := []string{
 			"ssh",
 			"-p", "2222",
+			"-i", infraboxKeyPath(),
 			"-o", "StrictHostKeyChecking=no",
 			"-o", "UserKnownHostsFile=/dev/null",
 			name + "@" + cfg.SSHPiperIP,
