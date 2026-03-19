@@ -4,13 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 )
-
-var pubKeyFile string
 
 var newCmd = &cobra.Command{
 	Use:   "new <name>",
@@ -20,9 +17,13 @@ var newCmd = &cobra.Command{
 		mustConfig()
 		name := args[0]
 
-		pubKey, err := loadPubKey(pubKeyFile)
+		if err := ensureSSHKey(); err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		pubKey, err := loadInfraboxPubKey()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: cannot read SSH public key: %v\n", err)
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -53,18 +54,3 @@ var newCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	newCmd.Flags().StringVarP(&pubKeyFile, "key", "k", "", "SSH public key file (default: ~/.ssh/id_ed25519.pub)")
-}
-
-func loadPubKey(path string) (string, error) {
-	if path == "" {
-		home, _ := os.UserHomeDir()
-		path = home + "/.ssh/id_ed25519.pub"
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
-}

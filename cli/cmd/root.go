@@ -35,7 +35,7 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(loadConfig, checkUpdateBackground)
-	rootCmd.AddCommand(newCmd, listCmd, deleteCmd, sshCmd, restartCmd, initCmd, upgradeCmd)
+	rootCmd.AddCommand(newCmd, listCmd, deleteCmd, sshCmd, restartCmd, initCmd, upgradeCmd, versionCmd)
 }
 
 func loadConfig() {
