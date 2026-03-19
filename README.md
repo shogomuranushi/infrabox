@@ -115,11 +115,10 @@ curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/i
 
 Or download the binary directly from [Releases](https://github.com/shogomuranushi/infrabox/releases).
 
-### Login
+### Set up
 
 ```bash
-ib login   # Opens browser → Google Workspace or Entra ID
-ib whoami  # Confirm your account and quota
+ib init   # Enter your API key → SSH key is auto-generated at ~/.ib/id_infrabox
 ```
 
 ### Create your first VM
@@ -131,13 +130,15 @@ ib new my-app
 ```
 ✓ Ready (7s)
 
-  SSH:  ssh my-app.infra.example.com
-  URL:  https://my-app.infra.example.com  (private)
+  SSH:       ib ssh my-app
+  HTTPS URL: https://my-app.infra.example.com
+```
 
-  Tips:
-    ib ssh my-app           — connect via SSH
-    ib open my-app          — open in browser
-    ib share public my-app  — share with your team
+```bash
+ib ssh my-app    # SSH into the VM
+ib list          # List your VMs
+ib delete my-app # Delete a VM
+ib upgrade       # Upgrade the CLI to the latest version
 ```
 
 ---
