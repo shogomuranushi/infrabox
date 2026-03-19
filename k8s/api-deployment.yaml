@@ -42,6 +42,8 @@ spec:
               value: "local-path"
             - name: INFRABOX_BASE_IMAGE
               value: "docker.io/library/infrabox-base:ubuntu-24.04"
+            - name: INFRABOX_VM_NODE_SELECTOR
+              value: ""
           volumeMounts:
             - name: data
               mountPath: /data

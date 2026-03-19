@@ -1,5 +1,10 @@
 # =============================================================
-# InfraBox — GCE single-file Terraform
+# InfraBox — GCE two-node Terraform
+#
+# Architecture:
+#   - API node:    e2-small, on-demand, k3s server + control plane workloads
+#   - Worker node: n2d-standard-4, spot, MIG-managed, k3s agent + VM workloads
+#   - Storage:     GCE PD via CSI driver (persistent across spot preemption)
 #
 # Usage:
 #   cd scripts/terraform-gce
@@ -65,27 +70,39 @@ variable "letsencrypt_email" {
 }
 
 variable "instance_name" {
-  description = "GCE instance name"
+  description = "Base name for GCE resources"
   type        = string
-  default     = "infrabox-k3s"
+  default     = "infrabox"
 }
 
-variable "machine_type" {
-  description = "GCE machine type"
+variable "api_machine_type" {
+  description = "Machine type for API node (on-demand)"
   type        = string
-  default     = "e2-medium"
+  default     = "e2-small"
 }
 
-variable "boot_disk_size" {
-  description = "Boot disk size in GB"
+variable "worker_machine_type" {
+  description = "Machine type for worker node (spot)"
+  type        = string
+  default     = "n2d-standard-4"
+}
+
+variable "api_disk_size" {
+  description = "API node boot disk size in GB"
   type        = number
-  default     = 50
+  default     = 20
 }
 
-variable "spot" {
-  description = "Use spot (preemptible) instance"
-  type        = bool
-  default     = true
+variable "worker_disk_size" {
+  description = "Worker node boot disk size in GB"
+  type        = number
+  default     = 20
+}
+
+variable "worker_count" {
+  description = "Number of worker instances in MIG"
+  type        = number
+  default     = 1
 }
 
 variable "allowed_cidrs" {
@@ -125,11 +142,13 @@ variable "oauth_email_domain" {
 # -------------------------------------------------------------
 
 locals {
-  region     = join("-", slice(split("-", var.gcp_zone), 0, 2))
-  api_key    = var.admin_api_key != "" ? var.admin_api_key : random_password.admin_api_key.result
+  region      = join("-", slice(split("-", var.gcp_zone), 0, 2))
+  api_key     = var.admin_api_key != "" ? var.admin_api_key : random_password.admin_api_key.result
   auth_domain = "auth.${var.domain}"
 
   source_cidrs = length(var.allowed_cidrs) > 0 ? var.allowed_cidrs : ["0.0.0.0/0"]
+
+  k3s_token = random_password.k3s_token.result
 }
 
 # -------------------------------------------------------------
@@ -143,7 +162,7 @@ provider "google" {
 }
 
 # -------------------------------------------------------------
-# Random admin API key (used when not supplied)
+# Random secrets
 # -------------------------------------------------------------
 
 resource "random_password" "admin_api_key" {
@@ -151,8 +170,13 @@ resource "random_password" "admin_api_key" {
   special = false
 }
 
+resource "random_password" "k3s_token" {
+  length  = 64
+  special = false
+}
+
 # -------------------------------------------------------------
-# Static IP
+# Static IP (for API node)
 # -------------------------------------------------------------
 
 resource "google_compute_address" "infrabox" {
@@ -174,7 +198,7 @@ resource "google_compute_firewall" "allow_health" {
   }
 
   source_ranges = ["130.211.0.0/22", "35.191.0.0/16"]
-  target_tags   = [var.instance_name]
+  target_tags   = ["${var.instance_name}-api"]
   description   = "Let's Encrypt HTTP-01 challenge"
 }
 
@@ -188,7 +212,7 @@ resource "google_compute_firewall" "allow_https" {
   }
 
   source_ranges = local.source_cidrs
-  target_tags   = [var.instance_name]
+  target_tags   = ["${var.instance_name}-api"]
   description   = "InfraBox HTTPS"
 }
 
@@ -202,7 +226,7 @@ resource "google_compute_firewall" "allow_ssh" {
   }
 
   source_ranges = local.source_cidrs
-  target_tags   = [var.instance_name]
+  target_tags   = ["${var.instance_name}-api"]
   description   = "InfraBox SSH via sshpiper"
 }
 
@@ -216,19 +240,52 @@ resource "google_compute_firewall" "allow_api" {
   }
 
   source_ranges = local.source_cidrs
-  target_tags   = [var.instance_name]
+  target_tags   = ["${var.instance_name}-api"]
   description   = "InfraBox API"
 }
 
+resource "google_compute_firewall" "allow_internal" {
+  name    = "${var.instance_name}-allow-internal"
+  network = "default"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["6443", "10250", "8472", "51820", "51821"]
+  }
+
+  allow {
+    protocol = "udp"
+    ports    = ["8472", "51820", "51821"]
+  }
+
+  source_tags = ["${var.instance_name}-api", "${var.instance_name}-worker"]
+  target_tags = ["${var.instance_name}-api", "${var.instance_name}-worker"]
+  description = "k3s internal communication (API server, kubelet, flannel VXLAN/WireGuard)"
+}
+
+resource "google_compute_firewall" "allow_mig_health" {
+  name    = "${var.instance_name}-allow-mig-health"
+  network = "default"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["10256"]
+  }
+
+  source_ranges = ["130.211.0.0/22", "35.191.0.0/16"]
+  target_tags   = ["${var.instance_name}-worker"]
+  description   = "MIG autohealing health check"
+}
+
 # -------------------------------------------------------------
-# GCE Instance
+# API Node (on-demand, k3s server)
 # -------------------------------------------------------------
 
-resource "google_compute_instance" "infrabox" {
-  name         = var.instance_name
-  machine_type = var.machine_type
+resource "google_compute_instance" "api" {
+  name         = "${var.instance_name}-api"
+  machine_type = var.api_machine_type
   zone         = var.gcp_zone
-  tags         = [var.instance_name]
+  tags         = ["${var.instance_name}-api"]
 
   lifecycle {
     precondition {
@@ -240,7 +297,7 @@ resource "google_compute_instance" "infrabox" {
   boot_disk {
     initialize_params {
       image = "ubuntu-os-cloud/ubuntu-2404-lts"
-      size  = var.boot_disk_size
+      size  = var.api_disk_size
       type  = "pd-ssd"
     }
   }
@@ -253,10 +310,9 @@ resource "google_compute_instance" "infrabox" {
   }
 
   scheduling {
-    preemptible                 = var.spot
-    automatic_restart           = var.spot ? false : true
-    provisioning_model          = var.spot ? "SPOT" : "STANDARD"
-    instance_termination_action = var.spot ? "STOP" : null
+    preemptible       = false
+    automatic_restart = true
+    provisioning_model = "STANDARD"
   }
 
   metadata_startup_script = <<-STARTUP
@@ -280,11 +336,12 @@ resource "google_compute_instance" "infrabox" {
     OAUTH_CLIENT_SECRET="${var.oauth_client_secret}"
     OAUTH_EMAIL_DOMAIN="${var.oauth_email_domain}"
     AUTH_DOMAIN="${local.auth_domain}"
+    K3S_TOKEN="${local.k3s_token}"
 
     # =========================================================
-    log "1. Install k3s"
+    log "1. Install k3s server"
     # =========================================================
-    curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--disable=traefik' sh -
+    curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--disable=traefik --node-taint infrabox-role=api:NoSchedule --node-label infrabox-role=api' K3S_TOKEN="$$K3S_TOKEN" sh -
     chmod 644 /etc/rancher/k3s/k3s.yaml
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
@@ -342,7 +399,32 @@ resource "google_compute_instance" "infrabox" {
     ]' 2>/dev/null || true
 
     # =========================================================
-    log "8. Create secrets"
+    log "8. Install GCE PD CSI Driver"
+    # =========================================================
+    kubectl apply -k "https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver/deploy/kubernetes/overlays/stable/?ref=v1.15.1"
+
+    # Wait for CSI driver to be ready
+    for i in $$(seq 1 30); do
+      kubectl get csidrivers pd.csi.storage.gke.io &>/dev/null && break
+      sleep 5
+    done
+
+    # Create StorageClass for PD-SSD
+    cat <<EOF | kubectl apply -f -
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
+    metadata:
+      name: pd-ssd
+    provisioner: pd.csi.storage.gke.io
+    parameters:
+      type: pd-ssd
+    reclaimPolicy: Delete
+    volumeBindingMode: WaitForFirstConsumer
+    allowVolumeExpansion: true
+    EOF
+
+    # =========================================================
+    log "9. Create secrets"
     # =========================================================
     if ! kubectl get secret sshpiper-upstream-key -n infrabox &>/dev/null; then
       ssh-keygen -t ed25519 -N '' -f /tmp/upstream-key
@@ -378,11 +460,19 @@ resource "google_compute_instance" "infrabox" {
       --dry-run=client -o yaml | kubectl apply -f -
 
     # =========================================================
-    log "9. Deploy infrabox-api"
+    log "10. Deploy infrabox-api"
     # =========================================================
     cd /tmp/infrabox-src
     kubectl apply -f k8s/rbac.yaml
     kubectl apply -f k8s/api-deployment.yaml
+
+    # Add tolerations so API pod runs on the tainted API node
+    kubectl patch deployment infrabox-api -n infrabox --type='json' -p='[
+      {"op":"add","path":"/spec/template/spec/tolerations",
+       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]},
+      {"op":"add","path":"/spec/template/spec/nodeSelector",
+       "value":{"infrabox-role":"api"}}
+    ]'
 
     AUTH_ENV_ARGS=""
     if [ -n "$$OAUTH_CLIENT_ID" ]; then
@@ -390,6 +480,9 @@ resource "google_compute_instance" "infrabox" {
     fi
     kubectl set env deployment/infrabox-api \
       INFRABOX_INGRESS_DOMAIN="$$DOMAIN" \
+      INFRABOX_STORAGE_CLASS="pd-ssd" \
+      INFRABOX_VM_NODE_SELECTOR="infrabox-role=vm-worker" \
+      INFRABOX_BASE_IMAGE="ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04" \
       $$AUTH_ENV_ARGS \
       -n infrabox
 
@@ -416,7 +509,24 @@ resource "google_compute_instance" "infrabox" {
       | kubectl apply -f -
 
     # =========================================================
-    log "10. oauth2-proxy (optional)"
+    log "11. Tolerate control plane for infra pods"
+    # =========================================================
+    # cert-manager, ingress-nginx, sshpiper need to run on API node
+    for ns_deploy in "ingress-nginx/ingress-nginx-controller" "cert-manager/cert-manager" "cert-manager/cert-manager-webhook" "cert-manager/cert-manager-cainjector"; do
+      NS=$${ns_deploy%%/*}
+      DEPLOY=$${ns_deploy##*/}
+      kubectl patch deployment "$$DEPLOY" -n "$$NS" --type='json' -p='[
+        {"op":"add","path":"/spec/template/spec/tolerations",
+         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+      ]' 2>/dev/null || true
+    done
+    kubectl patch deployment sshpiper -n infrabox --type='json' -p='[
+      {"op":"add","path":"/spec/template/spec/tolerations",
+       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+    ]' 2>/dev/null || true
+
+    # =========================================================
+    log "12. oauth2-proxy (optional)"
     # =========================================================
     if [ -n "$$OAUTH_CLIENT_ID" ]; then
       COOKIE_SECRET=$$(openssl rand -base64 32 | tr -d '\n')
@@ -432,6 +542,12 @@ resource "google_compute_instance" "infrabox" {
 
       sed "s/AUTH_DOMAIN_PLACEHOLDER/$$AUTH_DOMAIN/g" k8s/oauth2-proxy.yaml \
         | kubectl apply -f -
+
+      # Add toleration for API node
+      kubectl patch deployment oauth2-proxy -n infrabox --type='json' -p='[
+        {"op":"add","path":"/spec/template/spec/tolerations",
+         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+      ]' 2>/dev/null || true
 
       sed -e "s/API_DOMAIN_PLACEHOLDER/api.$$DOMAIN/g" \
           -e "s/AUTH_DOMAIN_PLACEHOLDER/$$AUTH_DOMAIN/g" \
@@ -458,11 +574,125 @@ resource "google_compute_instance" "infrabox" {
 }
 
 # -------------------------------------------------------------
+# Worker Instance Template (spot, k3s agent)
+# -------------------------------------------------------------
+
+resource "google_compute_instance_template" "worker" {
+  name_prefix  = "${var.instance_name}-worker-"
+  machine_type = var.worker_machine_type
+  tags         = ["${var.instance_name}-worker"]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  disk {
+    source_image = "ubuntu-os-cloud/ubuntu-2404-lts"
+    disk_size_gb = var.worker_disk_size
+    disk_type    = "pd-ssd"
+    auto_delete  = true
+    boot         = true
+  }
+
+  network_interface {
+    network = "default"
+    access_config {} # ephemeral public IP for outbound access
+  }
+
+  scheduling {
+    preemptible                 = true
+    automatic_restart           = false
+    provisioning_model          = "SPOT"
+    instance_termination_action = "STOP"
+  }
+
+  metadata = {
+    startup-script = <<-WORKER_STARTUP
+      #!/usr/bin/env bash
+      set -euo pipefail
+      exec > >(tee /var/log/infrabox-worker-startup.log) 2>&1
+
+      log() { echo "=== $$(date '+%H:%M:%S') $$* ==="; }
+
+      K3S_TOKEN="${local.k3s_token}"
+      API_IP="${google_compute_address.infrabox.address}"
+
+      # =========================================================
+      log "1. Install k3s agent"
+      # =========================================================
+      curl -sfL https://get.k3s.io | K3S_URL="https://$$API_IP:6443" K3S_TOKEN="$$K3S_TOKEN" INSTALL_K3S_EXEC='--node-label=infrabox-role=vm-worker' sh -
+
+      for i in $$(seq 1 30); do
+        k3s kubectl get nodes &>/dev/null && break
+        sleep 5
+      done
+
+      # =========================================================
+      log "2. Install Docker (for image building)"
+      # =========================================================
+      curl -fsSL https://get.docker.com | sh
+
+      # =========================================================
+      log "3. Import base image"
+      # =========================================================
+      # Pull from GHCR and import into k3s containerd
+      docker pull ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04
+      docker save ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04 | k3s ctr images import -
+
+      log "Worker setup complete!"
+    WORKER_STARTUP
+  }
+
+  service_account {
+    scopes = ["cloud-platform"]
+  }
+}
+
+# -------------------------------------------------------------
+# Worker MIG (Managed Instance Group)
+# -------------------------------------------------------------
+
+resource "google_compute_health_check" "worker" {
+  name                = "${var.instance_name}-worker-hc"
+  check_interval_sec  = 30
+  timeout_sec         = 10
+  healthy_threshold   = 2
+  unhealthy_threshold = 3
+
+  tcp_health_check {
+    port = 10250 # kubelet port
+  }
+}
+
+resource "google_compute_instance_group_manager" "worker" {
+  name               = "${var.instance_name}-worker-mig"
+  base_instance_name = "${var.instance_name}-worker"
+  zone               = var.gcp_zone
+  target_size        = var.worker_count
+
+  version {
+    instance_template = google_compute_instance_template.worker.self_link
+  }
+
+  auto_healing_policies {
+    health_check      = google_compute_health_check.worker.id
+    initial_delay_sec = 300
+  }
+
+  update_policy {
+    type                  = "PROACTIVE"
+    minimal_action        = "REPLACE"
+    max_surge_fixed       = 1
+    max_unavailable_fixed = 0
+  }
+}
+
+# -------------------------------------------------------------
 # Outputs
 # -------------------------------------------------------------
 
 output "static_ip" {
-  description = "Static IP address"
+  description = "Static IP address (API node)"
   value       = google_compute_address.infrabox.address
 }
 
@@ -472,9 +702,15 @@ output "admin_api_key" {
   sensitive   = true
 }
 
-output "ssh_command" {
-  description = "SSH into the instance"
-  value       = "gcloud compute ssh ${var.instance_name} --project=${var.gcp_project} --zone=${var.gcp_zone}"
+output "k3s_token" {
+  description = "k3s cluster token"
+  value       = local.k3s_token
+  sensitive   = true
+}
+
+output "ssh_command_api" {
+  description = "SSH into the API node"
+  value       = "gcloud compute ssh ${var.instance_name}-api --project=${var.gcp_project} --zone=${var.gcp_zone}"
 }
 
 output "dns_records" {
