@@ -1,1 +1,1 @@
-# infrabox
+# infra-box
