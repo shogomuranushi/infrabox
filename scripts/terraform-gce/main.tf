@@ -31,6 +31,11 @@ terraform {
 variable "gcp_project" {
   description = "GCP project ID"
   type        = string
+
+  validation {
+    condition     = length(var.gcp_project) > 0
+    error_message = "gcp_project must not be empty."
+  }
 }
 
 variable "gcp_zone" {
@@ -42,11 +47,21 @@ variable "gcp_zone" {
 variable "domain" {
   description = "Base domain for InfraBox (e.g. infrabox.example.com)"
   type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]+[a-z0-9]$", var.domain))
+    error_message = "domain must be a valid domain name (e.g. infrabox.example.com)."
+  }
 }
 
 variable "letsencrypt_email" {
   description = "Email for Let's Encrypt certificate"
   type        = string
+
+  validation {
+    condition     = can(regex("^[^@]+@[^@]+\\.[^@]+$", var.letsencrypt_email))
+    error_message = "letsencrypt_email must be a valid email address."
+  }
 }
 
 variable "instance_name" {
@@ -93,14 +108,14 @@ variable "oauth_client_id" {
 }
 
 variable "oauth_client_secret" {
-  description = "Google OAuth2 client secret"
+  description = "Google OAuth2 client secret (required if oauth_client_id is set)"
   type        = string
   default     = ""
   sensitive   = true
 }
 
 variable "oauth_email_domain" {
-  description = "Allowed email domain for OAuth (e.g. example.com)"
+  description = "Allowed email domain for OAuth (e.g. example.com, required if oauth_client_id is set)"
   type        = string
   default     = ""
 }
@@ -214,6 +229,13 @@ resource "google_compute_instance" "infrabox" {
   machine_type = var.machine_type
   zone         = var.gcp_zone
   tags         = [var.instance_name]
+
+  lifecycle {
+    precondition {
+      condition     = var.oauth_client_id == "" || (var.oauth_client_secret != "" && var.oauth_email_domain != "")
+      error_message = "oauth_client_secret and oauth_email_domain are required when oauth_client_id is set."
+    }
+  }
 
   boot_disk {
     initialize_params {
