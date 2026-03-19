@@ -1,4 +1,4 @@
-module github.com/shogomuranushi/infra-box/cli
+module github.com/shogomuranushi/infrabox/cli
 
 go 1.23
 
