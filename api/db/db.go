@@ -11,6 +11,7 @@ type VM struct {
 	ID        string
 	Name      string
 	Owner     string
+	Namespace string // K8s namespace where this VM's resources live
 	State     string // creating, running, error, deleted
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -38,6 +39,7 @@ func (d *DB) migrate() error {
 			id         TEXT PRIMARY KEY,
 			name       TEXT NOT NULL UNIQUE,
 			owner      TEXT NOT NULL DEFAULT '',
+			namespace  TEXT NOT NULL DEFAULT '',
 			state      TEXT NOT NULL DEFAULT 'creating',
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL
@@ -49,7 +51,12 @@ func (d *DB) migrate() error {
 			created_at DATETIME NOT NULL
 		);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Add namespace column for existing databases
+	d.conn.Exec(`ALTER TABLE vms ADD COLUMN namespace TEXT NOT NULL DEFAULT ''`)
+	return nil
 }
 
 type Key struct {
@@ -91,8 +98,8 @@ func (d *DB) FindKeyByName(name string) (*Key, error) {
 
 func (d *DB) InsertVM(vm *VM) error {
 	_, err := d.conn.Exec(
-		`INSERT OR REPLACE INTO vms (id, name, owner, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		vm.ID, vm.Name, vm.Owner, vm.State, vm.CreatedAt, vm.UpdatedAt,
+		`INSERT OR REPLACE INTO vms (id, name, owner, namespace, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		vm.ID, vm.Name, vm.Owner, vm.Namespace, vm.State, vm.CreatedAt, vm.UpdatedAt,
 	)
 	return err
 }
@@ -107,14 +114,14 @@ func (d *DB) UpdateVMState(name, state string) error {
 
 // GetVM returns the VM if it exists and belongs to owner (empty owner = admin, no restriction).
 func (d *DB) GetVM(name, owner string) (*VM, error) {
-	query := `SELECT id, name, owner, state, created_at, updated_at FROM vms WHERE name = ? AND state != 'deleted'`
+	query := `SELECT id, name, owner, namespace, state, created_at, updated_at FROM vms WHERE name = ? AND state != 'deleted'`
 	args := []interface{}{name}
 	if owner != "" {
 		query += ` AND owner = ?`
 		args = append(args, owner)
 	}
 	vm := &VM{}
-	err := d.conn.QueryRow(query, args...).Scan(&vm.ID, &vm.Name, &vm.Owner, &vm.State, &vm.CreatedAt, &vm.UpdatedAt)
+	err := d.conn.QueryRow(query, args...).Scan(&vm.ID, &vm.Name, &vm.Owner, &vm.Namespace, &vm.State, &vm.CreatedAt, &vm.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -123,7 +130,7 @@ func (d *DB) GetVM(name, owner string) (*VM, error) {
 
 // ListVMs returns VMs for the given owner (empty owner = admin, returns all).
 func (d *DB) ListVMs(owner string) ([]*VM, error) {
-	query := `SELECT id, name, owner, state, created_at, updated_at FROM vms WHERE state != 'deleted'`
+	query := `SELECT id, name, owner, namespace, state, created_at, updated_at FROM vms WHERE state != 'deleted'`
 	args := []interface{}{}
 	if owner != "" {
 		query += ` AND owner = ?`
@@ -139,7 +146,7 @@ func (d *DB) ListVMs(owner string) ([]*VM, error) {
 	var vms []*VM
 	for rows.Next() {
 		vm := &VM{}
-		if err := rows.Scan(&vm.ID, &vm.Name, &vm.Owner, &vm.State, &vm.CreatedAt, &vm.UpdatedAt); err != nil {
+		if err := rows.Scan(&vm.ID, &vm.Name, &vm.Owner, &vm.Namespace, &vm.State, &vm.CreatedAt, &vm.UpdatedAt); err != nil {
 			return nil, err
 		}
 		vms = append(vms, vm)

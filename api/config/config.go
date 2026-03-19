@@ -19,6 +19,8 @@ type Config struct {
 	IngressClass       string
 	UpstreamSecretName string
 	MaxVMsPerUser      int
+	UserCPUQuota       string // ResourceQuota requests.cpu per user namespace (e.g. "2")
+	UserMemoryQuota    string // ResourceQuota requests.memory per user namespace (e.g. "8Gi")
 }
 
 func Load() *Config {
@@ -35,7 +37,9 @@ func Load() *Config {
 		SSHPiperIP:         getEnv("INFRABOX_SSHPIPER_IP", ""),
 		IngressClass:       getEnv("INFRABOX_INGRESS_CLASS", "nginx"),
 		UpstreamSecretName: getEnv("INFRABOX_UPSTREAM_SECRET", "sshpiper-upstream-key"),
-		MaxVMsPerUser:      getEnvInt("INFRABOX_MAX_VMS_PER_USER", 15),
+		MaxVMsPerUser:      getEnvInt("INFRABOX_MAX_VMS_PER_USER", 10),
+		UserCPUQuota:       getEnv("INFRABOX_USER_CPU_QUOTA", "2"),
+		UserMemoryQuota:    getEnv("INFRABOX_USER_MEMORY_QUOTA", "8Gi"),
 	}
 }
 
