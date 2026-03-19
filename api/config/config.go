@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 )
 
 type Config struct {
@@ -17,6 +18,7 @@ type Config struct {
 	SSHPiperIP         string
 	IngressClass       string
 	UpstreamSecretName string
+	MaxVMsPerUser      int
 }
 
 func Load() *Config {
@@ -33,12 +35,22 @@ func Load() *Config {
 		SSHPiperIP:         getEnv("INFRABOX_SSHPIPER_IP", ""),
 		IngressClass:       getEnv("INFRABOX_INGRESS_CLASS", "nginx"),
 		UpstreamSecretName: getEnv("INFRABOX_UPSTREAM_SECRET", "sshpiper-upstream-key"),
+		MaxVMsPerUser:      getEnvInt("INFRABOX_MAX_VMS_PER_USER", 15),
 	}
 }
 
 func getEnv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return defaultVal
+}
+
+func getEnvInt(key string, defaultVal int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return defaultVal
 }

@@ -60,6 +60,16 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 
 	user := currentUser(r)
 
+	userVMs, err := h.db.ListVMs(user)
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if len(userVMs) >= h.cfg.MaxVMsPerUser {
+		jsonError(w, fmt.Sprintf("VM quota exceeded: you have %d/%d VMs. Delete an existing VM before creating a new one.", len(userVMs), h.cfg.MaxVMsPerUser), http.StatusTooManyRequests)
+		return
+	}
+
 	existing, err := h.db.GetVM(req.Name, "")
 	if err != nil {
 		jsonError(w, "db error", http.StatusInternalServerError)
