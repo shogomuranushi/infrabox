@@ -147,8 +147,10 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		UserPubKey:         req.PubKey,
 		UpstreamSecretName: h.cfg.UpstreamSecretName,
 		AuthURL:            h.cfg.AuthURL,
-		Owner:              user,
-		NodeSelector:       h.cfg.VMNodeSelector,
+		Owner:                   user,
+		NodeSelector:            h.cfg.VMNodeSelector,
+		RcloneDriveClientID:     h.cfg.RcloneDriveClientID,
+		RcloneDriveClientSecret: h.cfg.RcloneDriveClientSecret,
 	}
 
 	if err := h.k8s.CreateVM(r.Context(), k8sCfg); err != nil {
