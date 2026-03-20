@@ -57,6 +57,7 @@ func main() {
 		r.Get("/v1/vms", h.ListVMs)
 		r.Get("/v1/vms/{name}", h.GetVM)
 		r.Delete("/v1/vms/{name}", h.DeleteVM)
+		r.Patch("/v1/vms/{name}", h.RenameVM)
 		r.Post("/v1/vms/{name}/restart", h.RestartVM)
 
 		// Invitation codes (admin only)
