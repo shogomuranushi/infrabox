@@ -231,6 +231,25 @@ func (d *DB) ListInvitationCodes() ([]*InvitationCode, error) {
 	return codes, rows.Err()
 }
 
+// RenameVM changes the name of an existing VM. If owner is non-empty, only the owner's VM is affected.
+func (d *DB) RenameVM(oldName, newName, owner string) error {
+	query := `UPDATE vms SET name = ?, updated_at = ? WHERE name = ? AND state != 'deleted'`
+	args := []interface{}{newName, time.Now(), oldName}
+	if owner != "" {
+		query += ` AND owner = ?`
+		args = append(args, owner)
+	}
+	res, err := d.conn.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("VM not found")
+	}
+	return nil
+}
+
 // DeleteVM soft-deletes a VM. If owner is non-empty, only the owner's VM is affected.
 func (d *DB) DeleteVM(name, owner string) error {
 	query := `UPDATE vms SET state = 'deleted', updated_at = ? WHERE name = ? AND state != 'deleted'`
