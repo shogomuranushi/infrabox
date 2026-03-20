@@ -37,7 +37,10 @@ InfraBox側の変更はベースイメージへのrcloneプリインストール
 ## InfraBox側の変更
 
 ベースイメージ（GHCR公開）にはABEJA固有の情報を含めない。
-OAuth client_id/secretはK8s Secretで注入する。
+OAuth client_id/secretは環境変数でVM Podに注入する。
+
+rcloneは `RCLONE_DRIVE_CLIENT_ID` / `RCLONE_DRIVE_CLIENT_SECRET` 環境変数を認識するため、
+ファイルコピーやInit Container変更が不要でシンプル。
 
 ### 1. ベースイメージ: rcloneのインストールのみ
 
@@ -46,81 +49,95 @@ OAuth client_id/secretはK8s Secretで注入する。
 RUN curl https://rclone.org/install.sh | bash
 ```
 
-### 2. Admin: K8s Secretを作成（1回だけ）
+### 2. Admin: APIの環境変数にOAuth情報を設定（1回だけ）
 
-GCPでOAuthクライアントを作成し、K8s Secretとして登録する。
+GCPでOAuthクライアントを作成し、API Deploymentの環境変数に設定する。
 
 ```bash
 # 1. GCPコンソールでOAuthクライアントID（デスクトップアプリ）を作成
 #    - Google Drive APIを有効化
 #    - OAuth同意画面を設定
 
-# 2. rclone設定テンプレート（token無し）をK8s Secretとして作成
-cat <<'EOF' > /tmp/rclone.conf
-[gdrive]
-type = drive
-scope = drive.readonly
-client_id = YOUR_CLIENT_ID.apps.googleusercontent.com
-client_secret = YOUR_CLIENT_SECRET
-EOF
-
-kubectl create secret generic rclone-config-template \
-  --from-file=rclone.conf=/tmp/rclone.conf \
+# 2. K8s Secretに格納し、API Deploymentから参照
+kubectl create secret generic rclone-oauth \
+  --from-literal=client-id='YOUR_CLIENT_ID.apps.googleusercontent.com' \
+  --from-literal=client-secret='YOUR_CLIENT_SECRET' \
   -n infrabox-system
-
-rm /tmp/rclone.conf
 ```
 
-このSecretは全VMで共有される。client_id/secretだけではGDriveにアクセスできない
-（ユーザーのブラウザ認証が必須）ため、Secret内に持つのは安全。
+### 3. コード変更
 
-### 3. VM作成時: Init Containerで注入
-
-既存のInit Container `setup-ssh` にrclone設定のコピー処理を追加する。
+**api/config/config.go** — 設定を追加:
 
 ```go
-// api/k8s/vm.go — createDeployment()
+type Config struct {
+    // ... 既存フィールド ...
+    RcloneDriveClientID     string
+    RcloneDriveClientSecret string
+}
 
-// Init Container のコマンドに追加:
-// rclone設定テンプレートのコピー（Secretがマウントされている場合のみ）
-if [ -f /run/secrets/rclone-config/rclone.conf ]; then
-    mkdir -p /home/ubuntu/.config/rclone
-    cp /run/secrets/rclone-config/rclone.conf /home/ubuntu/.config/rclone/rclone.conf
-    chown ubuntu:ubuntu /home/ubuntu/.config/rclone/rclone.conf
-    chmod 600 /home/ubuntu/.config/rclone/rclone.conf
-fi
-
-// VolumeMounts に追加:
-{Name: "rclone-config", MountPath: "/run/secrets/rclone-config", ReadOnly: true}
-
-// Volumes に追加:
-{
-    Name: "rclone-config",
-    VolumeSource: corev1.VolumeSource{
-        Secret: &corev1.SecretVolumeSource{
-            SecretName:  "rclone-config-template",
-            DefaultMode: pointer.Int32(0400),
-            Optional:    pointer.Bool(true),  // Secretが無くてもVM作成は成功する
-        },
-    },
+func Load() *Config {
+    return &Config{
+        // ... 既存 ...
+        RcloneDriveClientID:     getEnv("INFRABOX_RCLONE_DRIVE_CLIENT_ID", ""),
+        RcloneDriveClientSecret: getEnv("INFRABOX_RCLONE_DRIVE_CLIENT_SECRET", ""),
+    }
 }
 ```
 
-`Optional: true` により、rclone設定が不要な環境ではSecretを作らなくてもよい。
+**api/k8s/vm.go** — VMConfigに追加し、Pod envに渡す:
+
+```go
+type VMConfig struct {
+    // ... 既存フィールド ...
+    RcloneDriveClientID     string
+    RcloneDriveClientSecret string
+}
+```
+
+Containerのenvに追加（値が空なら追加しない）:
+
+```go
+// vm container の Env に追加
+Env: []corev1.EnvVar{
+    {Name: "RCLONE_DRIVE_CLIENT_ID", Value: cfg.RcloneDriveClientID},
+    {Name: "RCLONE_DRIVE_CLIENT_SECRET", Value: cfg.RcloneDriveClientSecret},
+},
+```
+
+**k8s/api-deployment.yaml** — SecretからAPIに環境変数を渡す:
+
+```yaml
+env:
+  - name: INFRABOX_RCLONE_DRIVE_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        name: rclone-oauth
+        key: client-id
+        optional: true
+  - name: INFRABOX_RCLONE_DRIVE_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: rclone-oauth
+        key: client-secret
+        optional: true
+```
 
 ### ユーザー: 初回セットアップ（ブラウザ認証のみ）
 
-client_id/secretは設定済みなので、ユーザーはGoogle認証するだけ。
+環境変数でclient_id/secretは設定済み。ユーザーはrclone設定とGoogle認証するだけ。
 
 ```bash
 # VMにSSH
 ib ssh my-vm
 
-# rclone設定を確認（client_id/secretは入っている）
-cat ~/.config/rclone/rclone.conf
-
-# 対話式で認証（ブラウザでGoogleログイン）
-rclone config reconnect gdrive:
+# rclone設定（client_id/secretは環境変数にあるので入力不要）
+rclone config
+# name> gdrive
+# Storage> drive
+# client_id> （空のままEnter — 環境変数が使われる）
+# client_secret> （空のままEnter — 環境変数が使われる）
+# scope> 1  (drive.readonly)
 # → "Use web browser to automatically authenticate?" に No
 # → 表示されたURLをローカルブラウザで開く → Googleログイン → 許可
 # → 認証コードをVMに貼り付け → 完了
