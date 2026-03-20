@@ -39,12 +39,15 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 
 | | Feature |
 |---|---|
-| 🖥️ | VM create / list / delete / restart |
+| 🖥️ | VM create / list / delete / restart / rename |
 | 🔑 | SSH access |
 | 🌐 | HTTPS URL auto-provisioning |
 | 🔒 | Private / Public / External sharing |
 | 🔐 | Google Workspace & Entra ID SSO |
-| 💾 | Persistent disk (PVC) |
+| 🎟️ | Invitation code system for open-mode registration |
+| 🛡️ | Per-user namespace isolation & ResourceQuota |
+| 💾 | Persistent disk (GCE PD / PVC) |
+| 📁 | Google Drive context sharing via rclone |
 | 📦 | `ib` CLI tool |
 
 ---
@@ -59,32 +62,24 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 └───────────────┬──────────────────────┬───────────────┘
                 │ SSH:22               │ HTTPS:443
                 ▼                      ▼
- ┌──────────────────────┐   ┌──────────────────────────┐
- │      sshpiper        │   │  nginx-ingress +         │
- │   (SSH reverse proxy)│   │  cert-manager            │
- └───────────┬──────────┘   └────────────┬─────────────┘
-             │                           │
-             ▼                           ▼
 ┌────────────────────────────────────────────────────────┐
-│              Kubernetes Cluster                        │
+│              Kubernetes Cluster (k3s)                  │
 │                                                        │
-│  ┌─────────────────┐       ┌────────────────────────┐ │
-│  │  ContainerSSH   │──────▶│   InfraBox API (Go)    │ │
-│  └────────┬────────┘       └────────────────────────┘ │
-│           ▼                                            │
-│  ┌─────────────────────────────────────────────────┐  │
-│  │  VM Pods                                        │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐        │  │
-│  │  │ my-app   │ │ demo-env │ │agent-01  │  ...   │  │
-│  │  │ Ubuntu   │ │ Ubuntu   │ │ Ubuntu   │        │  │
-│  │  │ PVC:20GB │ │ PVC:20GB │ │ PVC:20GB │        │  │
-│  │  └──────────┘ └──────────┘ └──────────┘        │  │
-│  └─────────────────────────────────────────────────┘  │
+│  API Node (on-demand)                                  │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  sshpiper ─── ContainerSSH ──▶ InfraBox API     │  │
+│  │  nginx-ingress + cert-manager    Dex (OIDC)      │  │
+│  └──────────────────────────────────────────────────┘  │
 │                                                        │
-│  ┌──────────┐  ┌──────────┐                           │
-│  │   Dex    │  │ sshpiper │                           │
-│  │  (OIDC)  │  │  Pipes   │                           │
-│  └──────────┘  └──────────┘                           │
+│  Worker Node (spot)                                    │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  VM Pods (per-user namespace + ResourceQuota)    │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐         │  │
+│  │  │ my-app   │ │ demo-env │ │agent-01  │  ...    │  │
+│  │  │ Ubuntu   │ │ Ubuntu   │ │ Ubuntu   │         │  │
+│  │  │ PD:8GB   │ │ PD:8GB   │ │ PD:8GB   │         │  │
+│  │  └──────────┘ └──────────┘ └──────────┘         │  │
+│  └──────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -135,10 +130,11 @@ ib new my-app
 ```
 
 ```bash
-ib ssh my-app    # SSH into the VM
-ib list          # List your VMs
-ib delete my-app # Delete a VM
-ib upgrade       # Upgrade the CLI to the latest version
+ib ssh my-app        # SSH into the VM
+ib list              # List your VMs
+ib rename old new    # Rename a VM
+ib delete my-app     # Delete a VM
+ib upgrade           # Upgrade the CLI to the latest version
 ```
 
 ---
@@ -149,6 +145,7 @@ ib upgrade       # Upgrade the CLI to the latest version
 |---|---|---|
 | Local (macOS + Docker) | ✅ Working | [scripts/local-setup.sh](./scripts/local-setup.sh) |
 | GCE / VPS (k3s) | ✅ Working | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
+| GCE (Terraform) | ✅ Working | [scripts/terraform-gce/](./scripts/terraform-gce/) |
 | GKE / EKS / other managed K8s | 🚧 Coming soon | — |
 
 ---
