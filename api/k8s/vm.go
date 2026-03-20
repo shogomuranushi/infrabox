@@ -32,9 +32,11 @@ type VMConfig struct {
 	IngressHost        string
 	UserPubKey         string
 	UpstreamSecretName string
-	AuthURL            string // e.g. "https://auth.infrabox.example.com" - if set, adds oauth2-proxy auth annotations
-	Owner              string // user who owns this VM
-	NodeSelector       map[string]string // optional: schedule VM pods on specific nodes
+	AuthURL                 string            // e.g. "https://auth.infrabox.example.com" - if set, adds oauth2-proxy auth annotations
+	Owner                   string            // user who owns this VM
+	NodeSelector            map[string]string // optional: schedule VM pods on specific nodes
+	RcloneDriveClientID     string            // optional: OAuth client ID for rclone Google Drive sync
+	RcloneDriveClientSecret string            // optional: OAuth client secret for rclone Google Drive sync
 }
 
 // UserNamespace returns the per-user namespace name.
@@ -170,6 +172,17 @@ func (c *Client) WaitForPodReady(ctx context.Context, namespace, name string, ti
 
 // --- private helpers ---
 
+func vmEnv(cfg VMConfig) []corev1.EnvVar {
+	var env []corev1.EnvVar
+	if cfg.RcloneDriveClientID != "" {
+		env = append(env,
+			corev1.EnvVar{Name: "RCLONE_DRIVE_CLIENT_ID", Value: cfg.RcloneDriveClientID},
+			corev1.EnvVar{Name: "RCLONE_DRIVE_CLIENT_SECRET", Value: cfg.RcloneDriveClientSecret},
+		)
+	}
+	return env
+}
+
 func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 	_, err := c.Clientset.AppsV1().Deployments(cfg.Namespace).Create(ctx, &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -223,6 +236,7 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 								{ContainerPort: 22},
 								{ContainerPort: 8000},
 							},
+							Env: vmEnv(cfg),
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "home", MountPath: "/home/ubuntu"},
 							},
