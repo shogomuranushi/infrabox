@@ -98,11 +98,19 @@ type VMConfig struct {
 Containerのenvに追加（値が空なら追加しない）:
 
 ```go
-// vm container の Env に追加
-Env: []corev1.EnvVar{
-    {Name: "RCLONE_DRIVE_CLIENT_ID", Value: cfg.RcloneDriveClientID},
-    {Name: "RCLONE_DRIVE_CLIENT_SECRET", Value: cfg.RcloneDriveClientSecret},
-},
+// createDeployment() 内で env を組み立て
+var env []corev1.EnvVar
+if cfg.RcloneDriveClientID != "" {
+    env = append(env, corev1.EnvVar{
+        Name: "RCLONE_DRIVE_CLIENT_ID", Value: cfg.RcloneDriveClientID,
+    })
+    env = append(env, corev1.EnvVar{
+        Name: "RCLONE_DRIVE_CLIENT_SECRET", Value: cfg.RcloneDriveClientSecret,
+    })
+}
+
+// Container spec
+Env: env,  // rclone未設定なら空 = 既存動作に影響なし
 ```
 
 **k8s/api-deployment.yaml** — SecretからAPIに環境変数を渡す:
