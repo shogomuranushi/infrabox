@@ -22,7 +22,9 @@ type Config struct {
 	MaxVMsPerUser      int
 	UserCPUQuota       string // ResourceQuota requests.cpu per user namespace (e.g. "2")
 	UserMemoryQuota    string // ResourceQuota requests.memory per user namespace (e.g. "8Gi")
-	VMNodeSelector     map[string]string // nodeSelector for VM pods (e.g. infrabox-role=vm-worker)
+	VMNodeSelector          map[string]string // nodeSelector for VM pods (e.g. infrabox-role=vm-worker)
+	RcloneDriveClientID     string            // optional: OAuth client ID for rclone Google Drive sync
+	RcloneDriveClientSecret string            // optional: OAuth client secret for rclone Google Drive sync
 }
 
 func Load() *Config {
@@ -42,7 +44,9 @@ func Load() *Config {
 		MaxVMsPerUser:      getEnvInt("INFRABOX_MAX_VMS_PER_USER", 10),
 		UserCPUQuota:       getEnv("INFRABOX_USER_CPU_QUOTA", "2"),
 		UserMemoryQuota:    getEnv("INFRABOX_USER_MEMORY_QUOTA", "8Gi"),
-		VMNodeSelector:     parseNodeSelector(getEnv("INFRABOX_VM_NODE_SELECTOR", "")),
+		VMNodeSelector:          parseNodeSelector(getEnv("INFRABOX_VM_NODE_SELECTOR", "")),
+		RcloneDriveClientID:     getEnv("INFRABOX_RCLONE_DRIVE_CLIENT_ID", ""),
+		RcloneDriveClientSecret: getEnv("INFRABOX_RCLONE_DRIVE_CLIENT_SECRET", ""),
 	}
 }
 

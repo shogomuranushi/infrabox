@@ -30,5 +30,8 @@ RUN mkdir -p /var/run/sshd \
   && usermod -s /bin/zsh ubuntu \
   && echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
+# rclone (Google Drive sync for context sharing)
+RUN curl https://rclone.org/install.sh | bash
+
 EXPOSE 22 8000
 CMD ["/usr/sbin/sshd", "-D"]
