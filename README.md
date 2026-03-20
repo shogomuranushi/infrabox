@@ -39,12 +39,14 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 
 | | Feature |
 |---|---|
-| 🖥️ | VM create / list / delete / restart |
+| 🖥️ | VM create / list / delete / restart / rename |
 | 🔑 | SSH access |
 | 🌐 | HTTPS URL auto-provisioning |
 | 🔒 | Private / Public / External sharing |
 | 🔐 | Google Workspace & Entra ID SSO |
+| 🎟️ | Invitation code system for open-mode registration |
 | 💾 | Persistent disk (PVC) |
+| 📁 | Google Drive context sharing via rclone |
 | 📦 | `ib` CLI tool |
 
 ---
@@ -135,10 +137,11 @@ ib new my-app
 ```
 
 ```bash
-ib ssh my-app    # SSH into the VM
-ib list          # List your VMs
-ib delete my-app # Delete a VM
-ib upgrade       # Upgrade the CLI to the latest version
+ib ssh my-app        # SSH into the VM
+ib list              # List your VMs
+ib rename old new    # Rename a VM
+ib delete my-app     # Delete a VM
+ib upgrade           # Upgrade the CLI to the latest version
 ```
 
 ---

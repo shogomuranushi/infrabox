@@ -39,12 +39,14 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 
 | | Feature |
 |---|---|
-| 🖥️ | VM 作成 / 一覧 / 削除 / 再起動 |
+| 🖥️ | VM 作成 / 一覧 / 削除 / 再起動 / リネーム |
 | 🔑 | SSH アクセス |
 | 🌐 | HTTPS URL 自動払い出し |
 | 🔒 | Private / Public / External 共有設定 |
 | 🔐 | Google Workspace & Entra ID SSO |
+| 🎟️ | 招待コードによるオープンモード登録 |
 | 💾 | 永続ディスク（PVC） |
+| 📁 | rclone による Google Drive コンテキスト共有 |
 | 📦 | `ib` CLI ツール |
 
 ---
@@ -135,10 +137,11 @@ ib new my-app
 ```
 
 ```bash
-ib ssh my-app    # VMにSSH接続
-ib list          # VM一覧
-ib delete my-app # VMを削除
-ib upgrade       # CLIを最新版に更新
+ib ssh my-app        # VMにSSH接続
+ib list              # VM一覧
+ib rename old new    # VMをリネーム
+ib delete my-app     # VMを削除
+ib upgrade           # CLIを最新版に更新
 ```
 
 ---
