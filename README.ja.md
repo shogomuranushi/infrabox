@@ -39,12 +39,15 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 
 | | Feature |
 |---|---|
-| 🖥️ | VM 作成 / 一覧 / 削除 / 再起動 |
+| 🖥️ | VM 作成 / 一覧 / 削除 / 再起動 / リネーム |
 | 🔑 | SSH アクセス |
 | 🌐 | HTTPS URL 自動払い出し |
 | 🔒 | Private / Public / External 共有設定 |
 | 🔐 | Google Workspace & Entra ID SSO |
-| 💾 | 永続ディスク（PVC） |
+| 🎟️ | 招待コードによるオープンモード登録 |
+| 🛡️ | ユーザーごとの Namespace 分離 & ResourceQuota |
+| 💾 | 永続ディスク（GCE PD / PVC） |
+| 📁 | rclone による Google Drive コンテキスト共有 |
 | 📦 | `ib` CLI ツール |
 
 ---
@@ -59,32 +62,24 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 └───────────────┬──────────────────────┬───────────────┘
                 │ SSH:22               │ HTTPS:443
                 ▼                      ▼
- ┌──────────────────────┐   ┌──────────────────────────┐
- │      sshpiper        │   │  nginx-ingress +         │
- │   (SSH reverse proxy)│   │  cert-manager            │
- └───────────┬──────────┘   └────────────┬─────────────┘
-             │                           │
-             ▼                           ▼
 ┌────────────────────────────────────────────────────────┐
-│              Kubernetes Cluster                        │
+│              Kubernetes Cluster (k3s)                  │
 │                                                        │
-│  ┌─────────────────┐       ┌────────────────────────┐ │
-│  │  ContainerSSH   │──────▶│   InfraBox API (Go)    │ │
-│  └────────┬────────┘       └────────────────────────┘ │
-│           ▼                                            │
-│  ┌─────────────────────────────────────────────────┐  │
-│  │  VM Pods                                        │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐        │  │
-│  │  │ my-app   │ │ demo-env │ │agent-01  │  ...   │  │
-│  │  │ Ubuntu   │ │ Ubuntu   │ │ Ubuntu   │        │  │
-│  │  │ PVC:20GB │ │ PVC:20GB │ │ PVC:20GB │        │  │
-│  │  └──────────┘ └──────────┘ └──────────┘        │  │
-│  └─────────────────────────────────────────────────┘  │
+│  API Node (on-demand)                                  │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  sshpiper ─── ContainerSSH ──▶ InfraBox API     │  │
+│  │  nginx-ingress + cert-manager    Dex (OIDC)      │  │
+│  └──────────────────────────────────────────────────┘  │
 │                                                        │
-│  ┌──────────┐  ┌──────────┐                           │
-│  │   Dex    │  │ sshpiper │                           │
-│  │  (OIDC)  │  │  Pipes   │                           │
-│  └──────────┘  └──────────┘                           │
+│  Worker Node (spot)                                    │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  VM Pods (per-user namespace + ResourceQuota)    │  │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐         │  │
+│  │  │ my-app   │ │ demo-env │ │agent-01  │  ...    │  │
+│  │  │ Ubuntu   │ │ Ubuntu   │ │ Ubuntu   │         │  │
+│  │  │ PD:8GB   │ │ PD:8GB   │ │ PD:8GB   │         │  │
+│  │  └──────────┘ └──────────┘ └──────────┘         │  │
+│  └──────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -135,10 +130,11 @@ ib new my-app
 ```
 
 ```bash
-ib ssh my-app    # VMにSSH接続
-ib list          # VM一覧
-ib delete my-app # VMを削除
-ib upgrade       # CLIを最新版に更新
+ib ssh my-app        # VMにSSH接続
+ib list              # VM一覧
+ib rename old new    # VMをリネーム
+ib delete my-app     # VMを削除
+ib upgrade           # CLIを最新版に更新
 ```
 
 ---
@@ -149,6 +145,7 @@ ib upgrade       # CLIを最新版に更新
 |---|---|---|
 | ローカル（macOS + Docker） | ✅ 動作確認済み | [scripts/local-setup.sh](./scripts/local-setup.sh) |
 | GCE / VPS（k3s） | ✅ 動作確認済み | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
+| GCE（Terraform） | ✅ 動作確認済み | [scripts/terraform-gce/](./scripts/terraform-gce/) |
 | GKE / EKS などマネージド K8s | 🚧 対応予定 | — |
 
 ---
