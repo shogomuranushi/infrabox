@@ -36,61 +36,100 @@ InfraBox側の変更はベースイメージへのrcloneプリインストール
 
 ## InfraBox側の変更
 
-### Admin（1回だけ）
+ベースイメージ（GHCR公開）にはABEJA固有の情報を含めない。
+OAuth client_id/secretはK8s Secretで注入する。
 
-1. GCPコンソールでOAuthクライアントを1つ作成
-   - GCPプロジェクトでGoogle Drive APIを有効化
-   - OAuth同意画面を設定
-   - OAuthクライアントID（デスクトップアプリ）を作成
-
-2. ベースイメージにrcloneと、client_id/secret入りのテンプレート設定を埋め込む
+### 1. ベースイメージ: rcloneのインストールのみ
 
 ```dockerfile
 # images/base/Dockerfile に追加
-
-# rclone
 RUN curl https://rclone.org/install.sh | bash
-
-# GDrive用rclone設定テンプレート（token無し = 認証前の状態）
-RUN mkdir -p /etc/skel/.config/rclone && \
-    echo '[gdrive]\n\
-type = drive\n\
-scope = drive.readonly\n\
-client_id = YOUR_CLIENT_ID.apps.googleusercontent.com\n\
-client_secret = YOUR_CLIENT_SECRET' > /etc/skel/.config/rclone/rclone.conf
 ```
 
-`/etc/skel/` に置くことで、新規ユーザーのホームディレクトリに自動コピーされる。
-既存VMのユーザーには初回のみ手動コピーが必要。
+### 2. Admin: K8s Secretを作成（1回だけ）
 
-> **Note**: client_id/secretはOAuth認証のエントリポイントに過ぎず、
-> これだけではGDriveにアクセスできない（ユーザーのブラウザ認証が必須）。
-> ベースイメージに含めても安全。
+GCPでOAuthクライアントを作成し、K8s Secretとして登録する。
+
+```bash
+# 1. GCPコンソールでOAuthクライアントID（デスクトップアプリ）を作成
+#    - Google Drive APIを有効化
+#    - OAuth同意画面を設定
+
+# 2. rclone設定テンプレート（token無し）をK8s Secretとして作成
+cat <<'EOF' > /tmp/rclone.conf
+[gdrive]
+type = drive
+scope = drive.readonly
+client_id = YOUR_CLIENT_ID.apps.googleusercontent.com
+client_secret = YOUR_CLIENT_SECRET
+EOF
+
+kubectl create secret generic rclone-config-template \
+  --from-file=rclone.conf=/tmp/rclone.conf \
+  -n infrabox-system
+
+rm /tmp/rclone.conf
+```
+
+このSecretは全VMで共有される。client_id/secretだけではGDriveにアクセスできない
+（ユーザーのブラウザ認証が必須）ため、Secret内に持つのは安全。
+
+### 3. VM作成時: Init Containerで注入
+
+既存のInit Container `setup-ssh` にrclone設定のコピー処理を追加する。
+
+```go
+// api/k8s/vm.go — createDeployment()
+
+// Init Container のコマンドに追加:
+// rclone設定テンプレートのコピー（Secretがマウントされている場合のみ）
+if [ -f /run/secrets/rclone-config/rclone.conf ]; then
+    mkdir -p /home/ubuntu/.config/rclone
+    cp /run/secrets/rclone-config/rclone.conf /home/ubuntu/.config/rclone/rclone.conf
+    chown ubuntu:ubuntu /home/ubuntu/.config/rclone/rclone.conf
+    chmod 600 /home/ubuntu/.config/rclone/rclone.conf
+fi
+
+// VolumeMounts に追加:
+{Name: "rclone-config", MountPath: "/run/secrets/rclone-config", ReadOnly: true}
+
+// Volumes に追加:
+{
+    Name: "rclone-config",
+    VolumeSource: corev1.VolumeSource{
+        Secret: &corev1.SecretVolumeSource{
+            SecretName:  "rclone-config-template",
+            DefaultMode: pointer.Int32(0400),
+            Optional:    pointer.Bool(true),  // Secretが無くてもVM作成は成功する
+        },
+    },
+}
+```
+
+`Optional: true` により、rclone設定が不要な環境ではSecretを作らなくてもよい。
 
 ### ユーザー: 初回セットアップ（ブラウザ認証のみ）
+
+client_id/secretは設定済みなので、ユーザーはGoogle認証するだけ。
 
 ```bash
 # VMにSSH
 ib ssh my-vm
 
-# ブラウザでGoogleログインしてトークンを取得（client_id/secretの入力は不要）
-rclone authorize "drive" -- "YOUR_CLIENT_ID" "YOUR_CLIENT_SECRET"
-# → ブラウザが開く → Googleログイン → 許可
-# → トークンJSONが表示される
+# rclone設定を確認（client_id/secretは入っている）
+cat ~/.config/rclone/rclone.conf
 
-# 表示されたトークンをrclone設定に追加
-rclone config update gdrive token 'トークンJSON'
+# 対話式で認証（ブラウザでGoogleログイン）
+rclone config reconnect gdrive:
+# → "Use web browser to automatically authenticate?" に No
+# → 表示されたURLをローカルブラウザで開く → Googleログイン → 許可
+# → 認証コードをVMに貼り付け → 完了
 
 # 初回同期
 mkdir -p ~/context
 rclone sync gdrive:"共有フォルダ" ~/context/ \
   --include "*.md" --include "*.txt" --include "*.csv"
 ```
-
-> **補足**: VMはヘッドレス環境なので `rclone authorize` はローカルマシンで実行し、
-> 表示されたトークンをVMに貼り付ける形になる。
-> または `rclone config` の対話モードで "Use web browser to automatically authenticate?" に
-> "No" を選択し、表示されたURLをローカルブラウザで開く方法もある。
 
 ### ユーザー: 定期同期の設定
 
