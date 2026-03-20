@@ -1,4 +1,4 @@
-name: Build and push base image
+name: Build and deploy base image
 
 on:
   push:
@@ -38,3 +38,48 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Import base image into k3s on API node
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.GCE_HOST }}
+          username: ${{ secrets.GCE_USER }}
+          key: ${{ secrets.GCE_SSH_KEY }}
+          script: |
+            set -euo pipefail
+
+            # Pull latest base image from GHCR
+            docker pull ghcr.io/${{ github.repository_owner }}/infrabox-base:ubuntu-24.04
+
+            # Tag for local k3s usage
+            docker tag ghcr.io/${{ github.repository_owner }}/infrabox-base:ubuntu-24.04 infrabox-base:ubuntu-24.04
+
+            # Import into k3s containerd
+            docker save infrabox-base:ubuntu-24.04 | sudo k3s ctr images import -
+
+            echo "Base image updated on API node"
+
+            # Update on worker nodes via gcloud
+            WORKERS=$(gcloud compute instances list \
+              --filter="name~'^infrabox-worker' AND status=RUNNING" \
+              --format='value(name,zone)' 2>/dev/null) || true
+
+            if [ -z "$WORKERS" ]; then
+              echo "No running worker nodes found, skipping"
+              exit 0
+            fi
+
+            while IFS=$'\t' read -r name zone; do
+              echo "Updating base image on $name ($zone)"
+              gcloud compute ssh "$name" --zone="$zone" -- "
+                docker pull ghcr.io/${{ github.repository_owner }}/infrabox-base:ubuntu-24.04
+                docker tag ghcr.io/${{ github.repository_owner }}/infrabox-base:ubuntu-24.04 infrabox-base:ubuntu-24.04
+                docker save infrabox-base:ubuntu-24.04 | k3s ctr images import -
+                echo 'Base image updated on $name'
+              "
+            done <<< "$WORKERS"

@@ -47,12 +47,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Copy k8s manifests to GCE
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.GCE_HOST }}
+          username: ${{ secrets.GCE_USER }}
+          key: ${{ secrets.GCE_SSH_KEY }}
+          source: "k8s/*"
+          target: /tmp/infrabox-deploy
+          overwrite: true
+
       - name: Deploy to GCE via SSH
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.GCE_HOST }}
           username: ${{ secrets.GCE_USER }}
           key: ${{ secrets.GCE_SSH_KEY }}
+          envs: DOMAIN
           script: |
             set -euo pipefail
 
@@ -65,9 +76,18 @@ jobs:
             # Import into k3s containerd
             docker save infrabox-api:latest | sudo k3s ctr images import -
 
-            # Apply k8s manifests (in case they changed)
-            sudo kubectl apply -f /tmp/k8s/ 2>/dev/null || true
+            # Substitute domain placeholders in k8s manifests
+            cd /tmp/infrabox-deploy/k8s
+            if [ -n "${DOMAIN:-}" ]; then
+              sed -i "s|API_DOMAIN_PLACEHOLDER|api.${DOMAIN}|g" *.yaml
+              sed -i "s|AUTH_DOMAIN_PLACEHOLDER|auth.${DOMAIN}|g" *.yaml
+            fi
+
+            # Apply k8s manifests
+            sudo kubectl apply -f /tmp/infrabox-deploy/k8s/
 
             # Restart deployment to pick up new image
             sudo kubectl rollout restart deployment/infrabox-api -n infrabox
             sudo kubectl rollout status deployment/infrabox-api -n infrabox --timeout=90s
+        env:
+          DOMAIN: ${{ secrets.INFRABOX_DOMAIN }}
