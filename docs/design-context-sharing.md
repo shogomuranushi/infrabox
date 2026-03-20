@@ -36,44 +36,61 @@ InfraBox側の変更はベースイメージへのrcloneプリインストール
 
 ## InfraBox側の変更
 
-ベースイメージにrcloneをプリインストールするだけ。
+### Admin（1回だけ）
+
+1. GCPコンソールでOAuthクライアントを1つ作成
+   - GCPプロジェクトでGoogle Drive APIを有効化
+   - OAuth同意画面を設定
+   - OAuthクライアントID（デスクトップアプリ）を作成
+
+2. ベースイメージにrcloneと、client_id/secret入りのテンプレート設定を埋め込む
 
 ```dockerfile
 # images/base/Dockerfile に追加
+
+# rclone
 RUN curl https://rclone.org/install.sh | bash
+
+# GDrive用rclone設定テンプレート（token無し = 認証前の状態）
+RUN mkdir -p /etc/skel/.config/rclone && \
+    echo '[gdrive]\n\
+type = drive\n\
+scope = drive.readonly\n\
+client_id = YOUR_CLIENT_ID.apps.googleusercontent.com\n\
+client_secret = YOUR_CLIENT_SECRET' > /etc/skel/.config/rclone/rclone.conf
 ```
 
-## ユーザー側のセットアップ手順
+`/etc/skel/` に置くことで、新規ユーザーのホームディレクトリに自動コピーされる。
+既存VMのユーザーには初回のみ手動コピーが必要。
 
-### 前提: Admin（1回だけ）
+> **Note**: client_id/secretはOAuth認証のエントリポイントに過ぎず、
+> これだけではGDriveにアクセスできない（ユーザーのブラウザ認証が必須）。
+> ベースイメージに含めても安全。
 
-GCPコンソールでOAuthクライアントを1つ作成し、チームに共有する。
-
-1. GCPプロジェクトでGoogle Drive APIを有効化
-2. OAuth同意画面を設定
-3. OAuthクライアントID（デスクトップアプリ）を作成
-4. Client ID / Client Secret をチームに共有
-
-### ユーザー: 初回セットアップ
+### ユーザー: 初回セットアップ（ブラウザ認証のみ）
 
 ```bash
 # VMにSSH
 ib ssh my-vm
 
-# rclone設定（対話式）
-rclone config
-# name> gdrive
-# Storage> drive
-# client_id> （Adminから共有されたID）
-# client_secret> （Adminから共有されたSecret）
-# scope> 1  (drive.readonly)
+# ブラウザでGoogleログインしてトークンを取得（client_id/secretの入力は不要）
+rclone authorize "drive" -- "YOUR_CLIENT_ID" "YOUR_CLIENT_SECRET"
 # → ブラウザが開く → Googleログイン → 許可
+# → トークンJSONが表示される
+
+# 表示されたトークンをrclone設定に追加
+rclone config update gdrive token 'トークンJSON'
 
 # 初回同期
 mkdir -p ~/context
 rclone sync gdrive:"共有フォルダ" ~/context/ \
   --include "*.md" --include "*.txt" --include "*.csv"
 ```
+
+> **補足**: VMはヘッドレス環境なので `rclone authorize` はローカルマシンで実行し、
+> 表示されたトークンをVMに貼り付ける形になる。
+> または `rclone config` の対話モードで "Use web browser to automatically authenticate?" に
+> "No" を選択し、表示されたURLをローカルブラウザで開く方法もある。
 
 ### ユーザー: 定期同期の設定
 
