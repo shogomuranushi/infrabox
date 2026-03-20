@@ -219,6 +219,55 @@ func (h *Handler) DeleteVM(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type RenameVMRequest struct {
+	Name string `json:"name"`
+}
+
+func (h *Handler) RenameVM(w http.ResponseWriter, r *http.Request) {
+	oldName := chi.URLParam(r, "name")
+	var req RenameVMRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if !validName.MatchString(req.Name) {
+		jsonError(w, "name must match ^[a-z][a-z0-9-]{0,30}$", http.StatusBadRequest)
+		return
+	}
+
+	user := currentUser(r)
+
+	vm, err := h.db.GetVM(oldName, user)
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if vm == nil {
+		jsonError(w, "VM not found", http.StatusNotFound)
+		return
+	}
+
+	// Check new name is not already taken
+	existing, err := h.db.GetVM(req.Name, "")
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if existing != nil {
+		jsonError(w, "VM name already exists", http.StatusConflict)
+		return
+	}
+
+	if err := h.db.RenameVM(oldName, req.Name, user); err != nil {
+		jsonError(w, fmt.Sprintf("rename failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	vm.Name = req.Name
+	jsonOK(w, h.toResponse(vm, h.ingressHost(vm.Name)))
+}
+
 func (h *Handler) RestartVM(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	vm, err := h.db.GetVM(name, currentUser(r))
