@@ -20,7 +20,7 @@ func infraboxPubKeyPath() string {
 	return infraboxKeyPath() + ".pub"
 }
 
-// ensureSSHKey は ~/.ib/id_infrabox がなければ生成する。
+// ensureSSHKey generates ~/.ib/id_infrabox if it does not exist.
 func ensureSSHKey() error {
 	keyPath := infraboxKeyPath()
 	if _, err := os.Stat(keyPath); err == nil {
@@ -32,7 +32,7 @@ func ensureSSHKey() error {
 		return fmt.Errorf("generate key: %w", err)
 	}
 
-	// 秘密鍵を OpenSSH 形式で書き込む
+	// write private key in OpenSSH format
 	privPEM, err := ssh.MarshalPrivateKey(priv, "")
 	if err != nil {
 		return fmt.Errorf("marshal private key: %w", err)
@@ -44,7 +44,7 @@ func ensureSSHKey() error {
 		return fmt.Errorf("write private key: %w", err)
 	}
 
-	// 公開鍵を authorized_keys 形式で書き込む
+	// write public key in authorized_keys format
 	sshPub, err := ssh.NewPublicKey(pub)
 	if err != nil {
 		return fmt.Errorf("marshal public key: %w", err)
@@ -58,7 +58,7 @@ func ensureSSHKey() error {
 	return nil
 }
 
-// loadInfraboxPubKey は ~/.ib/id_infrabox.pub の内容を返す。
+// loadInfraboxPubKey returns the contents of ~/.ib/id_infrabox.pub.
 func loadInfraboxPubKey() (string, error) {
 	data, err := os.ReadFile(infraboxPubKeyPath())
 	if err != nil {

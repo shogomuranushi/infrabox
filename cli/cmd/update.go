@@ -20,8 +20,8 @@ type githubRelease struct {
 	TagName string `json:"tag_name"`
 }
 
-// checkUpdateBackground は起動時にバックグラウンドで更新チェックを行う。
-// 24時間以内にチェック済みであればスキップ。
+// checkUpdateBackground runs an update check in the background at startup.
+// Skipped if a check was performed within the last 24 hours.
 func checkUpdateBackground() {
 	if !shouldCheck() {
 		return
@@ -76,7 +76,7 @@ func fetchLatestVersion() (string, error) {
 	return rel.TagName, nil
 }
 
-// isNewer は latest が current より新しいかを semver の数値比較で判定する。
+// isNewer reports whether latest is a newer version than current.
 func isNewer(latest, current string) bool {
 	if latest == current || latest == "" || current == "dev" {
 		return false

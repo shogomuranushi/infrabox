@@ -65,7 +65,7 @@ type VMResponse struct {
 
 type CreateVMRequest struct {
 	Name   string `json:"name"`
-	PubKey string `json:"pub_key"` // ユーザーの SSH 公開鍵
+	PubKey string `json:"pub_key"` // user's SSH public key
 }
 
 func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {

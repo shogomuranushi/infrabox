@@ -59,13 +59,13 @@ func downloadAndReplace(version, binPath string) error {
 		return fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
 	}
 
-	// tar.gz を展開して ib バイナリを取り出す
+	// extract ib binary from tar.gz
 	newBin, err := extractBinary(resp.Body)
 	if err != nil {
 		return err
 	}
 
-	// 既存バイナリをバックアップしてから置き換え
+	// write to temp file then atomically replace the existing binary
 	tmp := binPath + ".tmp"
 	if err := os.WriteFile(tmp, newBin, 0755); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
