@@ -11,7 +11,7 @@ import (
 
 var sshCmd = &cobra.Command{
 	Use:   "ssh <name>",
-	Short: "VMにSSH接続する",
+	Short: "SSH into a VM",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		mustConfig()

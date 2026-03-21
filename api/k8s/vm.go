@@ -197,7 +197,7 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 				ObjectMeta: metav1.ObjectMeta{Labels: vmLabels(cfg.Name, cfg.Owner)},
 				Spec: corev1.PodSpec{
 					NodeSelector: cfg.NodeSelector,
-					// initContainer: PVCマウント後のパーミッション修正とupstream公開鍵の設定
+					// initContainer: fix PVC permissions and set up upstream public key after mount
 					InitContainers: []corev1.Container{
 						{
 							Name:            "setup-ssh",

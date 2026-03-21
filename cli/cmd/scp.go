@@ -12,14 +12,14 @@ import (
 
 var scpCmd = &cobra.Command{
 	Use:   "scp <src> <dst>",
-	Short: "VMとの間でファイルを転送する (SCP)",
-	Long: `VMとの間でファイルを転送する。
-パスに「VM名:パス」形式を使うことで、ローカルとリモートを指定できる。
+	Short: "Transfer files to/from a VM (SCP)",
+	Long: `Transfer files between local and a VM using SCP.
+Use "vmname:path" format to specify a remote path.
 
-例:
-  ib scp ./local.txt myvm:/tmp/          # ローカル → VM
-  ib scp myvm:/tmp/remote.txt ./         # VM → ローカル
-  ib scp -r ./dir myvm:/home/ubuntu/     # ディレクトリを再帰コピー`,
+Examples:
+  ib scp ./local.txt myvm:/tmp/          # local → VM
+  ib scp myvm:/tmp/remote.txt ./         # VM → local
+  ib scp -r ./dir myvm:/home/ubuntu/     # recursive copy`,
 	Args: cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		mustConfig()
@@ -59,10 +59,10 @@ var scpCmd = &cobra.Command{
 	},
 }
 
-// rewriteScpPath は "vmname:/path" を "vmname@sshpiper_ip:/path" に変換する。
-// コロンを含まないパスはローカルパスとしてそのまま返す。
+// rewriteScpPath rewrites "vmname:/path" to "vmname@sshpiper_ip:/path".
+// Paths without a colon are treated as local and returned as-is.
 func rewriteScpPath(path string) string {
-	// すでに @ を含んでいればそのまま返す
+	// already contains @, pass through as-is
 	if strings.Contains(path, "@") {
 		return path
 	}
@@ -76,5 +76,5 @@ func rewriteScpPath(path string) string {
 }
 
 func init() {
-	scpCmd.Flags().BoolP("recursive", "r", false, "ディレクトリを再帰的にコピーする")
+	scpCmd.Flags().BoolP("recursive", "r", false, "Recursively copy directories")
 }

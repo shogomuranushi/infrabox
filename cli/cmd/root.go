@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ビルド時に -ldflags で埋め込む
+// Embedded at build time via -ldflags.
 var defaultEndpoint string
 var defaultSSHPiperIP string
 var Version = "dev"
@@ -42,7 +42,7 @@ func loadConfig() {
 	path := configPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// 設定ファイルがなければデフォルト値で自動生成
+		// no config file — initialize with defaults
 		cfg = Config{
 			Endpoint:   getEnv("INFRABOX_ENDPOINT", defaultEndpoint),
 			SSHPiperIP: getEnv("INFRABOX_SSHPIPER_IP", defaultSSHPiperIP),
@@ -60,7 +60,7 @@ func loadConfig() {
 		fmt.Fprintf(os.Stderr, "config parse error: %v\n", err)
 		os.Exit(1)
 	}
-	// 環境変数でオーバーライド
+	// environment variable overrides
 	if v := os.Getenv("INFRABOX_ENDPOINT"); v != "" {
 		cfg.Endpoint = v
 	}

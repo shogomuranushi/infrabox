@@ -20,7 +20,7 @@ func main() {
 		log.Fatal("INFRABOX_API_KEY must be set")
 	}
 
-	// DB のディレクトリ作成
+	// ensure data directory exists
 	if err := os.MkdirAll("/data", 0755); err != nil {
 		log.Printf("WARN: cannot create /data: %v (using current dir)", err)
 		cfg.DBPath = "./infrabox.db"

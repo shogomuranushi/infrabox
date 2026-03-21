@@ -131,6 +131,7 @@ ib new my-app
 
 ```bash
 ib ssh my-app        # SSH into the VM
+ib scp ./file myvm:/tmp/   # Transfer a file to the VM
 ib list              # List your VMs
 ib rename old new    # Rename a VM
 ib delete my-app     # Delete a VM

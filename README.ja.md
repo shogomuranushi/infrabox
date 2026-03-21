@@ -131,6 +131,7 @@ ib new my-app
 
 ```bash
 ib ssh my-app        # VMにSSH接続
+ib scp ./file myvm:/tmp/   # ファイルをVMに転送
 ib list              # VM一覧
 ib rename old new    # VMをリネーム
 ib delete my-app     # VMを削除
