@@ -296,7 +296,7 @@ resource "google_compute_instance" "api" {
 
   boot_disk {
     initialize_params {
-      image = "ubuntu-os-cloud/ubuntu-2404-lts"
+      image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
       size  = var.api_disk_size
       type  = "pd-ssd"
     }
@@ -320,10 +320,10 @@ resource "google_compute_instance" "api" {
     set -euo pipefail
     exec > >(tee /var/log/infrabox-startup.log) 2>&1
 
-    log() { echo "=== $$(date '+%H:%M:%S') $$* ==="; }
+    log() { echo "=== $(date '+%H:%M:%S') $* ==="; }
 
     MARKER=/var/lib/infrabox-setup-done
-    if [ -f "$$MARKER" ]; then
+    if [ -f "$MARKER" ]; then
       echo "InfraBox setup already completed. Skipping."
       exit 0
     fi
@@ -341,11 +341,11 @@ resource "google_compute_instance" "api" {
     # =========================================================
     log "1. Install k3s server"
     # =========================================================
-    curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--disable=traefik --node-taint infrabox-role=api:NoSchedule --node-label infrabox-role=api' K3S_TOKEN="$$K3S_TOKEN" sh -
+    curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--disable=traefik --node-taint infrabox-role=api:NoSchedule --node-label infrabox-role=api' K3S_TOKEN="$K3S_TOKEN" sh -
     chmod 644 /etc/rancher/k3s/k3s.yaml
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-    for i in $$(seq 1 30); do
+    for i in $(seq 1 30); do
       kubectl get nodes &>/dev/null && break
       sleep 5
     done
@@ -404,7 +404,7 @@ resource "google_compute_instance" "api" {
     kubectl apply -k "https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver/deploy/kubernetes/overlays/stable/?ref=v1.15.1"
 
     # Wait for CSI driver to be ready
-    for i in $$(seq 1 30); do
+    for i in $(seq 1 30); do
       kubectl get csidrivers pd.csi.storage.gke.io &>/dev/null && break
       sleep 5
     done
@@ -454,9 +454,9 @@ resource "google_compute_instance" "api" {
 
     kubectl create secret generic infrabox-api-secret \
       -n infrabox \
-      --from-literal=api-key="$$ADMIN_API_KEY" \
-      --from-literal=ingress-ip="$$STATIC_IP" \
-      --from-literal=sshpiper-ip="$$STATIC_IP" \
+      --from-literal=api-key="$ADMIN_API_KEY" \
+      --from-literal=ingress-ip="$STATIC_IP" \
+      --from-literal=sshpiper-ip="$STATIC_IP" \
       --dry-run=client -o yaml | kubectl apply -f -
 
     # =========================================================
@@ -475,15 +475,15 @@ resource "google_compute_instance" "api" {
     ]'
 
     AUTH_ENV_ARGS=""
-    if [ -n "$$OAUTH_CLIENT_ID" ]; then
-      AUTH_ENV_ARGS="INFRABOX_AUTH_URL=https://$$AUTH_DOMAIN"
+    if [ -n "$OAUTH_CLIENT_ID" ]; then
+      AUTH_ENV_ARGS="INFRABOX_AUTH_URL=https://$AUTH_DOMAIN"
     fi
     kubectl set env deployment/infrabox-api \
-      INFRABOX_INGRESS_DOMAIN="$$DOMAIN" \
+      INFRABOX_INGRESS_DOMAIN="$DOMAIN" \
       INFRABOX_STORAGE_CLASS="pd-ssd" \
       INFRABOX_VM_NODE_SELECTOR="infrabox-role=vm-worker" \
       INFRABOX_BASE_IMAGE="infrabox-base:ubuntu-24.04" \
-      $$AUTH_ENV_ARGS \
+      $AUTH_ENV_ARGS \
       -n infrabox
 
     kubectl rollout status deployment/infrabox-api -n infrabox --timeout=90s
@@ -496,7 +496,7 @@ resource "google_compute_instance" "api" {
     spec:
       acme:
         server: https://acme-v02.api.letsencrypt.org/directory
-        email: $$LETSENCRYPT_EMAIL
+        email: $LETSENCRYPT_EMAIL
         privateKeySecretRef:
           name: letsencrypt-account-key
         solvers:
@@ -505,7 +505,7 @@ resource "google_compute_instance" "api" {
               class: nginx
     EOF
 
-    sed "s/API_DOMAIN_PLACEHOLDER/api.$$DOMAIN/g" k8s/api-ingress.yaml \
+    sed "s/API_DOMAIN_PLACEHOLDER/api.$DOMAIN/g" k8s/api-ingress.yaml \
       | kubectl apply -f -
 
     # =========================================================
@@ -513,9 +513,9 @@ resource "google_compute_instance" "api" {
     # =========================================================
     # cert-manager, ingress-nginx, sshpiper need to run on API node
     for ns_deploy in "ingress-nginx/ingress-nginx-controller" "cert-manager/cert-manager" "cert-manager/cert-manager-webhook" "cert-manager/cert-manager-cainjector"; do
-      NS=$${ns_deploy%%/*}
-      DEPLOY=$${ns_deploy##*/}
-      kubectl patch deployment "$$DEPLOY" -n "$$NS" --type='json' -p='[
+      NS=$(echo "$ns_deploy" | cut -d/ -f1)
+      DEPLOY=$(echo "$ns_deploy" | cut -d/ -f2)
+      kubectl patch deployment "$DEPLOY" -n "$NS" --type='json' -p='[
         {"op":"add","path":"/spec/template/spec/tolerations",
          "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
       ]' 2>/dev/null || true
@@ -528,19 +528,19 @@ resource "google_compute_instance" "api" {
     # =========================================================
     log "12. oauth2-proxy (optional)"
     # =========================================================
-    if [ -n "$$OAUTH_CLIENT_ID" ]; then
-      COOKIE_SECRET=$$(openssl rand -base64 32 | tr -d '\n')
+    if [ -n "$OAUTH_CLIENT_ID" ]; then
+      COOKIE_SECRET=$(openssl rand -base64 32 | tr -d '\n')
 
       kubectl create secret generic oauth2-proxy-secret \
         -n infrabox \
-        --from-literal=client-id="$$OAUTH_CLIENT_ID" \
-        --from-literal=client-secret="$$OAUTH_CLIENT_SECRET" \
-        --from-literal=cookie-secret="$$COOKIE_SECRET" \
-        --from-literal=email-domain="$$OAUTH_EMAIL_DOMAIN" \
-        --from-literal=cookie-domain=".$$DOMAIN" \
+        --from-literal=client-id="$OAUTH_CLIENT_ID" \
+        --from-literal=client-secret="$OAUTH_CLIENT_SECRET" \
+        --from-literal=cookie-secret="$COOKIE_SECRET" \
+        --from-literal=email-domain="$OAUTH_EMAIL_DOMAIN" \
+        --from-literal=cookie-domain=".$DOMAIN" \
         --dry-run=client -o yaml | kubectl apply -f -
 
-      sed "s/AUTH_DOMAIN_PLACEHOLDER/$$AUTH_DOMAIN/g" k8s/oauth2-proxy.yaml \
+      sed "s/AUTH_DOMAIN_PLACEHOLDER/$AUTH_DOMAIN/g" k8s/oauth2-proxy.yaml \
         | kubectl apply -f -
 
       # Add toleration for API node
@@ -549,8 +549,8 @@ resource "google_compute_instance" "api" {
          "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
       ]' 2>/dev/null || true
 
-      sed -e "s/API_DOMAIN_PLACEHOLDER/api.$$DOMAIN/g" \
-          -e "s/AUTH_DOMAIN_PLACEHOLDER/$$AUTH_DOMAIN/g" \
+      sed -e "s/API_DOMAIN_PLACEHOLDER/api.$DOMAIN/g" \
+          -e "s/AUTH_DOMAIN_PLACEHOLDER/$AUTH_DOMAIN/g" \
           k8s/api-ingress-auth.yaml \
         | kubectl apply -f -
 
@@ -563,7 +563,7 @@ resource "google_compute_instance" "api" {
     # =========================================================
     log "Setup complete!"
     # =========================================================
-    touch "$$MARKER"
+    touch "$MARKER"
   STARTUP
 
   service_account {
@@ -587,7 +587,7 @@ resource "google_compute_instance_template" "worker" {
   }
 
   disk {
-    source_image = "ubuntu-os-cloud/ubuntu-2404-lts"
+    source_image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
     disk_size_gb = var.worker_disk_size
     disk_type    = "pd-ssd"
     auto_delete  = true
@@ -612,7 +612,7 @@ resource "google_compute_instance_template" "worker" {
       set -euo pipefail
       exec > >(tee /var/log/infrabox-worker-startup.log) 2>&1
 
-      log() { echo "=== $$(date '+%H:%M:%S') $$* ==="; }
+      log() { echo "=== $(date '+%H:%M:%S') $* ==="; }
 
       K3S_TOKEN="${local.k3s_token}"
       API_IP="${google_compute_address.infrabox.address}"
@@ -620,9 +620,9 @@ resource "google_compute_instance_template" "worker" {
       # =========================================================
       log "1. Install k3s agent"
       # =========================================================
-      curl -sfL https://get.k3s.io | K3S_URL="https://$$API_IP:6443" K3S_TOKEN="$$K3S_TOKEN" INSTALL_K3S_EXEC='--node-label=infrabox-role=vm-worker' sh -
+      curl -sfL https://get.k3s.io | K3S_URL="https://$API_IP:6443" K3S_TOKEN="$K3S_TOKEN" INSTALL_K3S_EXEC='--node-label=infrabox-role=vm-worker' sh -
 
-      for i in $$(seq 1 30); do
+      for i in $(seq 1 30); do
         k3s kubectl get nodes &>/dev/null && break
         sleep 5
       done
