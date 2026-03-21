@@ -395,11 +395,16 @@ resource "google_compute_instance" "api" {
     log "6. Install nginx-ingress"
     # =========================================================
     kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0/deploy/static/provider/baremetal/deploy.yaml
-    # Patch toleration immediately so pod can schedule on API node
+    # Patch toleration + hostPort so pod can schedule on API node and bind 80/443 directly
     sleep 5
     kubectl patch deployment ingress-nginx-controller -n ingress-nginx --type='json' -p='[
       {"op":"add","path":"/spec/template/spec/tolerations",
-       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]},
+      {"op":"replace","path":"/spec/template/spec/containers/0/ports",
+       "value":[
+         {"name":"http","containerPort":80,"hostPort":80,"protocol":"TCP"},
+         {"name":"https","containerPort":443,"hostPort":443,"protocol":"TCP"}
+       ]}
     ]' 2>/dev/null || true
     kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
 
@@ -616,7 +621,8 @@ resource "google_compute_instance_template" "worker" {
       log() { echo "=== $(date '+%H:%M:%S') $* ==="; }
 
       K3S_TOKEN="${local.k3s_token}"
-      API_IP="${google_compute_address.infrabox.address}"
+      # Use internal IP for API server (external IP port 6443 is not exposed via firewall)
+      API_IP="${google_compute_instance.api.network_interface[0].network_ip}"
 
       # =========================================================
       log "1. Install k3s agent"
