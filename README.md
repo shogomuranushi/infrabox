@@ -105,7 +105,7 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 ### Install ib CLI
 
 ```bash
-curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/install.sh | sudo sh
 ```
 
 Or download the binary directly from [Releases](https://github.com/shogomuranushi/infrabox/releases).

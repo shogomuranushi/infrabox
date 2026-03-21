@@ -105,7 +105,7 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 ### ib CLI のインストール
 
 ```bash
-curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/install.sh | sudo sh
 ```
 
 バイナリを直接ダウンロードする場合は [Releases](https://github.com/shogomuranushi/infrabox/releases) から。
