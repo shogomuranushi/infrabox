@@ -380,6 +380,14 @@ resource "google_compute_instance" "api" {
     log "5. Install cert-manager"
     # =========================================================
     kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+    # Patch tolerations immediately so pods can schedule on API node (tainted with infrabox-role=api:NoSchedule)
+    sleep 5
+    for deploy in cert-manager cert-manager-webhook cert-manager-cainjector; do
+      kubectl patch deployment "$deploy" -n cert-manager --type='json' -p='[
+        {"op":"add","path":"/spec/template/spec/tolerations",
+         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+      ]' 2>/dev/null || true
+    done
     kubectl -n cert-manager rollout status deploy/cert-manager --timeout=180s
     kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=180s
 
@@ -387,15 +395,25 @@ resource "google_compute_instance" "api" {
     log "6. Install nginx-ingress"
     # =========================================================
     kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0/deploy/static/provider/baremetal/deploy.yaml
+    # Patch toleration immediately so pod can schedule on API node
+    sleep 5
+    kubectl patch deployment ingress-nginx-controller -n ingress-nginx --type='json' -p='[
+      {"op":"add","path":"/spec/template/spec/tolerations",
+       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+    ]' 2>/dev/null || true
     kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
 
     # =========================================================
     log "7. Install sshpiper"
     # =========================================================
-    kubectl apply -f https://raw.githubusercontent.com/tg123/sshpiper/master/hack/kubernetes/sshpiperd.yaml -n infrabox
+    # New URL (old hack/kubernetes/sshpiperd.yaml was removed in v1.x)
+    kubectl apply -f https://raw.githubusercontent.com/tg123/sshpiper/master/plugin/kubernetes/crd.yaml
+    kubectl apply -f https://raw.githubusercontent.com/tg123/sshpiper/master/plugin/kubernetes/sample.yaml -n infrabox
+    # Patch toleration immediately so pod can schedule on API node
+    sleep 5
     kubectl patch deployment sshpiper -n infrabox --type='json' -p='[
-      {"op":"replace","path":"/spec/template/spec/containers/0/ports",
-       "value":[{"containerPort":2222,"hostPort":2222}]}
+      {"op":"add","path":"/spec/template/spec/tolerations",
+       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
     ]' 2>/dev/null || true
 
     # =========================================================
@@ -509,24 +527,7 @@ resource "google_compute_instance" "api" {
       | kubectl apply -f -
 
     # =========================================================
-    log "11. Tolerate control plane for infra pods"
-    # =========================================================
-    # cert-manager, ingress-nginx, sshpiper need to run on API node
-    for ns_deploy in "ingress-nginx/ingress-nginx-controller" "cert-manager/cert-manager" "cert-manager/cert-manager-webhook" "cert-manager/cert-manager-cainjector"; do
-      NS=$(echo "$ns_deploy" | cut -d/ -f1)
-      DEPLOY=$(echo "$ns_deploy" | cut -d/ -f2)
-      kubectl patch deployment "$DEPLOY" -n "$NS" --type='json' -p='[
-        {"op":"add","path":"/spec/template/spec/tolerations",
-         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
-      ]' 2>/dev/null || true
-    done
-    kubectl patch deployment sshpiper -n infrabox --type='json' -p='[
-      {"op":"add","path":"/spec/template/spec/tolerations",
-       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
-    ]' 2>/dev/null || true
-
-    # =========================================================
-    log "12. oauth2-proxy (optional)"
+    log "11. oauth2-proxy (optional)"
     # =========================================================
     if [ -n "$OAUTH_CLIENT_ID" ]; then
       COOKIE_SECRET=$(openssl rand -base64 32 | tr -d '\n')
