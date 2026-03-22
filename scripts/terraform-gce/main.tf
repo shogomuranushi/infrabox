@@ -216,20 +216,6 @@ resource "google_compute_firewall" "allow_https" {
   description   = "InfraBox HTTPS"
 }
 
-resource "google_compute_firewall" "allow_api" {
-  name    = "${var.instance_name}-allow-api"
-  network = "default"
-
-  allow {
-    protocol = "tcp"
-    ports    = ["30080"]
-  }
-
-  source_ranges = local.source_cidrs
-  target_tags   = ["${var.instance_name}-api"]
-  description   = "InfraBox API"
-}
-
 resource "google_compute_firewall" "allow_internal" {
   name    = "${var.instance_name}-allow-internal"
   network = "default"

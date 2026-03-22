@@ -100,11 +100,6 @@ gcloud compute firewall-rules create "${INSTANCE_NAME}-allow-https" \
   --target-tags="${INSTANCE_NAME}-api" \
   --allow=tcp:443,tcp:80 \
   --source-ranges="$SOURCE_RANGES"
-gcloud compute firewall-rules create "${INSTANCE_NAME}-allow-api" \
-  --project="$GCP_PROJECT" \
-  --target-tags="${INSTANCE_NAME}-api" \
-  --allow=tcp:30080 \
-  --source-ranges="$SOURCE_RANGES"
 
 # Internal k3s communication between API and worker nodes
 if ! gcloud compute firewall-rules describe "${INSTANCE_NAME}-allow-internal" \
@@ -484,7 +479,7 @@ log "11. Verify"
 # =============================================================
 echo "  Waiting for API to respond..."
 for i in $(seq 1 12); do
-  if curl -sf "http://${STATIC_IP}:30080/healthz" &>/dev/null; then
+  if curl -sf "https://api.${DOMAIN}/healthz" &>/dev/null; then
     ok "API is healthy"
     break
   fi
