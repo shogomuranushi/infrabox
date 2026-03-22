@@ -11,13 +11,11 @@ import (
 
 // Embedded at build time via -ldflags.
 var defaultEndpoint string
-var defaultSSHPiperIP string
 var Version = "dev"
 
 type Config struct {
-	Endpoint   string `yaml:"endpoint"`
-	APIKey     string `yaml:"api_key"`
-	SSHPiperIP string `yaml:"sshpiper_ip"`
+	Endpoint string `yaml:"endpoint"`
+	APIKey   string `yaml:"api_key"`
 }
 
 var cfg Config
@@ -44,9 +42,8 @@ func loadConfig() {
 	if err != nil {
 		// no config file — initialize with defaults
 		cfg = Config{
-			Endpoint:   getEnv("INFRABOX_ENDPOINT", defaultEndpoint),
-			SSHPiperIP: getEnv("INFRABOX_SSHPIPER_IP", defaultSSHPiperIP),
-			APIKey:     "",
+			Endpoint: getEnv("INFRABOX_ENDPOINT", defaultEndpoint),
+			APIKey:   "",
 		}
 		if cfg.Endpoint != "" {
 			if err := saveConfig(cfg); err == nil {

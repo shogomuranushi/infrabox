@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,31 +15,6 @@ import (
 	"github.com/shogomuranushi/infra-box/api/db"
 	k8sclient "github.com/shogomuranushi/infra-box/api/k8s"
 )
-
-var validKeyTypes = map[string]bool{
-	"ssh-rsa":             true,
-	"ssh-ed25519":         true,
-	"ecdsa-sha2-nistp256": true,
-	"ecdsa-sha2-nistp384": true,
-	"ecdsa-sha2-nistp521": true,
-	"sk-ssh-ed25519@openssh.com":         true,
-	"sk-ecdsa-sha2-nistp256@openssh.com": true,
-}
-
-// validateSSHPublicKey checks that the key looks like a valid SSH public key.
-func validateSSHPublicKey(pubKey string) error {
-	parts := strings.Fields(pubKey)
-	if len(parts) < 2 {
-		return fmt.Errorf("invalid SSH public key format")
-	}
-	if !validKeyTypes[parts[0]] {
-		return fmt.Errorf("unsupported key type: %s", parts[0])
-	}
-	if _, err := base64.StdEncoding.DecodeString(parts[1]); err != nil {
-		return fmt.Errorf("invalid base64 key data")
-	}
-	return nil
-}
 
 var validName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 
@@ -58,14 +32,13 @@ type VMResponse struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	State      string `json:"state"`
-	SSHCommand string `json:"ssh_command"`
+	ExecURL    string `json:"exec_url"`
 	IngressURL string `json:"ingress_url"`
 	CreatedAt  string `json:"created_at"`
 }
 
 type CreateVMRequest struct {
-	Name   string `json:"name"`
-	PubKey string `json:"pub_key"` // user's SSH public key
+	Name string `json:"name"`
 }
 
 func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
@@ -77,14 +50,6 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	req.Name = strings.TrimSpace(req.Name)
 	if !validName.MatchString(req.Name) {
 		jsonError(w, "name must match ^[a-z][a-z0-9-]{0,30}$", http.StatusBadRequest)
-		return
-	}
-	if req.PubKey == "" {
-		jsonError(w, "pub_key is required", http.StatusBadRequest)
-		return
-	}
-	if err := validateSSHPublicKey(req.PubKey); err != nil {
-		jsonError(w, fmt.Sprintf("invalid pub_key: %v", err), http.StatusBadRequest)
 		return
 	}
 
@@ -137,16 +102,13 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 
 	ingressHost := h.ingressHost(req.Name)
 	k8sCfg := k8sclient.VMConfig{
-		Name:               req.Name,
-		Namespace:          vmNamespace,
-		SSHPiperNamespace:  h.cfg.SSHPiperNamespace,
-		StorageClass:       h.cfg.StorageClass,
-		BaseImage:          h.cfg.BaseImage,
-		IngressClass:       h.cfg.IngressClass,
-		IngressHost:        ingressHost,
-		UserPubKey:         req.PubKey,
-		UpstreamSecretName: h.cfg.UpstreamSecretName,
-		AuthURL:            h.cfg.AuthURL,
+		Name:                    req.Name,
+		Namespace:               vmNamespace,
+		StorageClass:            h.cfg.StorageClass,
+		BaseImage:               h.cfg.BaseImage,
+		IngressClass:            h.cfg.IngressClass,
+		IngressHost:             ingressHost,
+		AuthURL:                 h.cfg.AuthURL,
 		Owner:                   user,
 		NodeSelector:            h.cfg.VMNodeSelector,
 		RcloneDriveClientID:     h.cfg.RcloneDriveClientID,
@@ -213,7 +175,7 @@ func (h *Handler) DeleteVM(w http.ResponseWriter, r *http.Request) {
 	if vmNamespace == "" {
 		vmNamespace = h.cfg.VMNamespace // fallback for pre-migration VMs
 	}
-	if err := h.k8s.DeleteVM(r.Context(), vmNamespace, h.cfg.SSHPiperNamespace, name); err != nil {
+	if err := h.k8s.DeleteVM(r.Context(), vmNamespace, name); err != nil {
 		log.Printf("WARN: DeleteVM k8s error for %s: %v", name, err)
 	}
 	h.db.DeleteVM(name, currentUser(r))
@@ -304,20 +266,21 @@ func (h *Handler) ingressHost(name string) string {
 }
 
 func (h *Handler) toResponse(vm *db.VM, ingressHost string) VMResponse {
-	sshCmd := vm.Name + "@" + h.cfg.SSHPiperIP
-	if h.cfg.SSHPiperIP == "" {
-		sshCmd = "ssh " + vm.Name + " (set INFRABOX_SSHPIPER_IP)"
-	} else {
-		sshCmd = "ssh " + vm.Name + "@" + h.cfg.SSHPiperIP
-	}
 	return VMResponse{
 		ID:         vm.ID,
 		Name:       vm.Name,
 		State:      vm.State,
-		SSHCommand: sshCmd,
+		ExecURL:    fmt.Sprintf("wss://%s/v1/vms/%s/exec", h.ingressAPIHost(), vm.Name),
 		IngressURL: "https://" + ingressHost,
 		CreatedAt:  vm.CreatedAt.Format(time.RFC3339),
 	}
+}
+
+func (h *Handler) ingressAPIHost() string {
+	if h.cfg.IngressDomain != "" {
+		return "api." + h.cfg.IngressDomain
+	}
+	return "localhost:8080"
 }
 
 func jsonOK(w http.ResponseWriter, v interface{}) {

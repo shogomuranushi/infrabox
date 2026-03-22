@@ -31,11 +31,6 @@ spec:
                 secretKeyRef:
                   name: infrabox-api-secret
                   key: ingress-ip
-            - name: INFRABOX_SSHPIPER_IP
-              valueFrom:
-                secretKeyRef:
-                  name: infrabox-api-secret
-                  key: sshpiper-ip
             - name: INFRABOX_INGRESS_DOMAIN
               value: "infrabox.example.com"
             - name: INFRABOX_STORAGE_CLASS

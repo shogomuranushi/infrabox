@@ -216,20 +216,6 @@ resource "google_compute_firewall" "allow_https" {
   description   = "InfraBox HTTPS"
 }
 
-resource "google_compute_firewall" "allow_ssh" {
-  name    = "${var.instance_name}-allow-ssh"
-  network = "default"
-
-  allow {
-    protocol = "tcp"
-    ports    = ["2222"]
-  }
-
-  source_ranges = local.source_cidrs
-  target_tags   = ["${var.instance_name}-api"]
-  description   = "InfraBox SSH via sshpiper"
-}
-
 resource "google_compute_firewall" "allow_api" {
   name    = "${var.instance_name}-allow-api"
   network = "default"
@@ -374,7 +360,6 @@ resource "google_compute_instance" "api" {
     # =========================================================
     kubectl create ns infrabox     2>/dev/null || true
     kubectl create ns infrabox-vms 2>/dev/null || true
-    kubectl create ns sshpiper     2>/dev/null || true
 
     # =========================================================
     log "5. Install cert-manager"
@@ -409,20 +394,7 @@ resource "google_compute_instance" "api" {
     kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
 
     # =========================================================
-    log "7. Install sshpiper"
-    # =========================================================
-    # New URL (old hack/kubernetes/sshpiperd.yaml was removed in v1.x)
-    kubectl apply -f https://raw.githubusercontent.com/tg123/sshpiper/master/plugin/kubernetes/crd.yaml
-    kubectl apply -f https://raw.githubusercontent.com/tg123/sshpiper/master/plugin/kubernetes/sample.yaml -n infrabox
-    # Patch toleration immediately so pod can schedule on API node
-    sleep 5
-    kubectl patch deployment sshpiper -n infrabox --type='json' -p='[
-      {"op":"add","path":"/spec/template/spec/tolerations",
-       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
-    ]' 2>/dev/null || true
-
-    # =========================================================
-    log "8. Install GCE PD CSI Driver"
+    log "7. Install GCE PD CSI Driver"
     # =========================================================
     kubectl apply -k "https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver/deploy/kubernetes/overlays/stable/?ref=v1.15.1"
 
@@ -447,43 +419,16 @@ resource "google_compute_instance" "api" {
     EOF
 
     # =========================================================
-    log "9. Create secrets"
+    log "8. Create secrets"
     # =========================================================
-    if ! kubectl get secret sshpiper-upstream-key -n infrabox &>/dev/null; then
-      ssh-keygen -t ed25519 -N '' -f /tmp/upstream-key
-      kubectl create secret generic sshpiper-upstream-key \
-        -n infrabox \
-        --from-file=ssh-privatekey=/tmp/upstream-key
-      rm -f /tmp/upstream-key /tmp/upstream-key.pub
-    fi
-
-    kubectl get secret sshpiper-upstream-key -n infrabox -o json \
-      | python3 -c "
-    import json,sys
-    s=json.load(sys.stdin)
-    for k in ['resourceVersion','uid','creationTimestamp']:
-      s['metadata'].pop(k, None)
-    s['metadata']['namespace']='infrabox-vms'
-    print(json.dumps(s))
-    " | kubectl apply -f - 2>/dev/null || true
-
-    if ! kubectl get secret sshpiper-server-key -n infrabox &>/dev/null; then
-      ssh-keygen -t ed25519 -N '' -f /tmp/server-key
-      kubectl create secret generic sshpiper-server-key \
-        -n infrabox \
-        --from-file=ssh-hostkey=/tmp/server-key
-      rm -f /tmp/server-key /tmp/server-key.pub
-    fi
-
     kubectl create secret generic infrabox-api-secret \
       -n infrabox \
       --from-literal=api-key="$ADMIN_API_KEY" \
       --from-literal=ingress-ip="$STATIC_IP" \
-      --from-literal=sshpiper-ip="$STATIC_IP" \
       --dry-run=client -o yaml | kubectl apply -f -
 
     # =========================================================
-    log "10. Deploy infrabox-api"
+    log "9. Deploy infrabox-api"
     # =========================================================
     cd /tmp/infrabox-src
     kubectl apply -f k8s/rbac.yaml
@@ -532,7 +477,7 @@ resource "google_compute_instance" "api" {
       | kubectl apply -f -
 
     # =========================================================
-    log "11. oauth2-proxy (optional)"
+    log "10. oauth2-proxy (optional)"
     # =========================================================
     if [ -n "$OAUTH_CLIENT_ID" ]; then
       COOKIE_SECRET=$(openssl rand -base64 32 | tr -d '\n')
@@ -735,7 +680,6 @@ output "dns_records" {
 output "cli_config" {
   description = "CLI configuration (~/.ib/config.yaml)"
   value       = <<-EOT
-    endpoint:    https://api.${var.domain}
-    sshpiper_ip: ${google_compute_address.infrabox.address}
+    endpoint: https://api.${var.domain}
   EOT
 }

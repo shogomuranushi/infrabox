@@ -59,12 +59,7 @@ var initCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		if err := ensureSSHKey(); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: failed to generate SSH key: %v\n", err)
-			os.Exit(1)
-		}
-
-		fmt.Printf("\n✓ Setup complete\n\n")
+		fmt.Printf("\nSetup complete\n\n")
 		fmt.Printf("  Run 'ib new <name>' to create a VM\n\n")
 	},
 }
