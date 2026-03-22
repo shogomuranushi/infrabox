@@ -18,10 +18,10 @@
 
 ```bash
 $ ib new my-app
-✓ 完了（7秒）
+完了（7秒）
 
-  SSH:  ssh my-app.infra.example.com
-  URL:  https://my-app.infra.example.com  (private)
+  Shell: ib ssh my-app
+  URL:   https://my-app.infra.example.com
 ```
 
 - **Webアプリとしてすぐ公開** — 作成と同時にHTTPS URLが払い出され、即座に外部公開可能
@@ -40,7 +40,8 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 | | Feature |
 |---|---|
 | 🖥️ | VM 作成 / 一覧 / 削除 / 再起動 / リネーム |
-| 🔑 | SSH アクセス |
+| 🔌 | WebSocket 経由のシェルアクセス（SSH 鍵管理不要） |
+| 📂 | ファイル転送（API 経由のアップロード / ダウンロード） |
 | 🌐 | HTTPS URL 自動払い出し |
 | 🔒 | Private / Public / External 共有設定 |
 | 🔐 | Google Workspace & Entra ID SSO |
@@ -57,18 +58,18 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 ```
 ┌──────────────────────────────────────────────────────┐
 │                        User                          │
-│   ssh my-app.infra.example.com                       │
+│   ib ssh my-app       (WebSocket over HTTPS)         │
 │   https://my-app.infra.example.com                   │
-└───────────────┬──────────────────────┬───────────────┘
-                │ SSH:22               │ HTTPS:443
-                ▼                      ▼
+└──────────────────────┬───────────────────────────────┘
+                       │ HTTPS:443
+                       ▼
 ┌────────────────────────────────────────────────────────┐
 │              Kubernetes Cluster (k3s)                  │
 │                                                        │
 │  API Node (on-demand)                                  │
 │  ┌──────────────────────────────────────────────────┐  │
-│  │  sshpiper ─── ContainerSSH ──▶ InfraBox API     │  │
-│  │  nginx-ingress + cert-manager    Dex (OIDC)      │  │
+│  │  InfraBox API ── K8s exec (SPDY) ──▶ VM Pods    │  │
+│  │  nginx-ingress + cert-manager                    │  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                        │
 │  Worker Node (spot)                                    │
@@ -83,15 +84,30 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 └────────────────────────────────────────────────────────┘
 ```
 
+### シェルアクセスの仕組み
+
+InfraBox は SSH の代わりに **WebSocket + K8s exec** を使用します:
+
+```
+ib ssh myvm
+  → WebSocket (wss://api.example.com/v1/vms/myvm/exec)
+  → API サーバーが API キーで認証
+  → K8s pod exec (SPDY) で VM コンテナに接続
+  → インタラクティブな bash セッション
+```
+
+これにより:
+- **SSH 鍵の管理が不要** — API キーだけで OK
+- **SSH ポート (2222) が不要** — すべての通信は HTTPS (443) 経由
+- **sshpiper や SSH プロキシが不要** — コンポーネントが少なくシンプル
+
 ### OSS Stack
 
-| Component | OSS | Role |
+| コンポーネント | OSS | 役割 |
 |---|---|---|
-| SSH Proxy | [sshpiper](https://github.com/tg123/sshpiper) | Route SSH by VM name |
-| SSH → Pod | [ContainerSSH](https://github.com/ContainerSSH/ContainerSSH) | Spawn/connect to K8s Pod per SSH session |
-| HTTPS Proxy | [ingress-nginx](https://github.com/kubernetes/ingress-nginx) + [cert-manager](https://github.com/cert-manager/cert-manager) | TLS termination, wildcard cert |
-| SSO | [Dex](https://github.com/dexidp/dex) | OIDC broker for Google Workspace / Entra ID |
-| VM Management | InfraBox API (Go) | VM CRUD, quota, access control |
+| HTTPS Proxy | [ingress-nginx](https://github.com/kubernetes/ingress-nginx) + [cert-manager](https://github.com/cert-manager/cert-manager) | TLS 終端、ワイルドカード証明書 |
+| SSO | [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) | Google Workspace / Entra ID 認証 |
+| VM 管理 | InfraBox API (Go) | VM CRUD、exec、ファイル転送、クォータ |
 
 ---
 
@@ -113,7 +129,7 @@ curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/i
 ### セットアップ
 
 ```bash
-ib init   # APIキーを入力 → SSHキーが ~/.ib/id_infrabox に自動生成される
+ib init   # API キーを入力
 ```
 
 ### 最初のVMを作る
@@ -123,20 +139,40 @@ ib new my-app
 ```
 
 ```
-✓ Ready (7s)
+完了（7秒）
 
-  SSH:       ib ssh my-app
+  Shell:     ib ssh my-app
   HTTPS URL: https://my-app.infra.example.com
 ```
 
 ```bash
-ib ssh my-app        # VMにSSH接続
-ib scp ./file myvm:/tmp/   # ファイルをVMに転送
-ib list              # VM一覧
-ib rename old new    # VMをリネーム
-ib delete my-app     # VMを削除
-ib upgrade           # CLIを最新版に更新
+ib ssh my-app              # VM でシェルを開く
+ib scp ./file myvm:/tmp/   # ファイルを VM にアップロード
+ib scp myvm:/tmp/f ./      # ファイルを VM からダウンロード
+ib list                    # VM 一覧
+ib rename old new          # VM をリネーム
+ib delete my-app           # VM を削除
+ib upgrade                 # CLI を最新版に更新
 ```
+
+---
+
+## API エンドポイント
+
+| メソッド | パス | 説明 |
+|---|---|---|
+| `POST` | `/v1/keys` | API キー作成 |
+| `POST` | `/v1/vms` | VM 作成 |
+| `GET` | `/v1/vms` | VM 一覧 |
+| `GET` | `/v1/vms/{name}` | VM 詳細 |
+| `DELETE` | `/v1/vms/{name}` | VM 削除 |
+| `PATCH` | `/v1/vms/{name}` | VM リネーム |
+| `POST` | `/v1/vms/{name}/restart` | VM 再起動 |
+| `GET` | `/v1/vms/{name}/exec` | WebSocket シェルセッション |
+| `POST` | `/v1/vms/{name}/files?path=` | ファイルアップロード（tar ストリーム） |
+| `GET` | `/v1/vms/{name}/files?path=` | ファイルダウンロード（tar ストリーム） |
+
+`/healthz` と `/v1/keys` 以外のエンドポイントは `X-API-Key` ヘッダが必要です。
 
 ---
 
@@ -144,10 +180,10 @@ ib upgrade           # CLIを最新版に更新
 
 | 環境 | 状態 | セットアップ |
 |---|---|---|
-| ローカル（macOS + Docker） | ✅ 動作確認済み | [scripts/local-setup.sh](./scripts/local-setup.sh) |
-| GCE / VPS（k3s） | ✅ 動作確認済み | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
-| GCE（Terraform） | ✅ 動作確認済み | [scripts/terraform-gce/](./scripts/terraform-gce/) |
-| GKE / EKS などマネージド K8s | 🚧 対応予定 | — |
+| ローカル（macOS + Docker） | 動作確認済み | [scripts/local-setup.sh](./scripts/local-setup.sh) |
+| GCE / VPS（k3s） | 動作確認済み | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
+| GCE（Terraform） | 動作確認済み | [scripts/terraform-gce/](./scripts/terraform-gce/) |
+| GKE / EKS などマネージド K8s | 対応予定 | — |
 
 ---
 

@@ -3,12 +3,17 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
 
 var upgrader = websocket.Upgrader{
+	// CheckOrigin allows all origins because CLI clients don't send Origin headers.
+	// Authentication is enforced via X-API-Key header in the middleware, which
+	// browsers cannot set on cross-origin WebSocket connections.
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
@@ -41,7 +46,7 @@ func (h *Handler) ExecVM(w http.ResponseWriter, r *http.Request) {
 	if err := h.k8s.ExecPod(r.Context(), vmNamespace, name, conn); err != nil {
 		log.Printf("ERROR: exec for %s: %v", name, err)
 		conn.WriteMessage(websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, err.Error()))
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "session ended"))
 	}
 }
 
@@ -59,9 +64,13 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	destPath := r.URL.Query().Get("path")
-	if destPath == "" {
+	destPath := filepath.Clean(r.URL.Query().Get("path"))
+	if destPath == "" || destPath == "." {
 		destPath = "/home/ubuntu"
+	}
+	if !strings.HasPrefix(destPath, "/") {
+		jsonError(w, "path must be absolute", http.StatusBadRequest)
+		return
 	}
 
 	vmNamespace := vm.Namespace
@@ -69,7 +78,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		vmNamespace = h.cfg.VMNamespace
 	}
 
-	if err := h.k8s.CopyToPod(r.Context(), vmNamespace, name, destPath, r.Body); err != nil {
+	// Limit upload size to 1 GiB
+	body := http.MaxBytesReader(w, r.Body, 1<<30)
+	if err := h.k8s.CopyToPod(r.Context(), vmNamespace, name, destPath, body); err != nil {
 		log.Printf("ERROR: upload to %s: %v", name, err)
 		jsonError(w, "upload failed", http.StatusInternalServerError)
 		return
@@ -91,9 +102,13 @@ func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	srcPath := r.URL.Query().Get("path")
-	if srcPath == "" {
+	srcPath := filepath.Clean(r.URL.Query().Get("path"))
+	if srcPath == "" || srcPath == "." {
 		jsonError(w, "path query parameter is required", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(srcPath, "/") {
+		jsonError(w, "path must be absolute", http.StatusBadRequest)
 		return
 	}
 

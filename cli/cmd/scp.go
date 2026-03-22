@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,7 +135,7 @@ func uploadToVM(vmName, destPath, localPath string, recursive bool) error {
 		}
 	}()
 
-	reqURL := fmt.Sprintf("%s/v1/vms/%s/files?path=%s", cfg.Endpoint, vmName, destPath)
+	reqURL := fmt.Sprintf("%s/v1/vms/%s/files?path=%s", cfg.Endpoint, url.PathEscape(vmName), url.QueryEscape(destPath))
 	req, err := http.NewRequest("POST", reqURL, pr)
 	if err != nil {
 		return err
@@ -156,7 +157,7 @@ func uploadToVM(vmName, destPath, localPath string, recursive bool) error {
 }
 
 func downloadFromVM(vmName, srcPath, localDst string) error {
-	reqURL := fmt.Sprintf("%s/v1/vms/%s/files?path=%s", cfg.Endpoint, vmName, srcPath)
+	reqURL := fmt.Sprintf("%s/v1/vms/%s/files?path=%s", cfg.Endpoint, url.PathEscape(vmName), url.QueryEscape(srcPath))
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
 		return err
@@ -175,6 +176,7 @@ func downloadFromVM(vmName, srcPath, localDst string) error {
 	}
 
 	tr := tar.NewReader(resp.Body)
+	absDst, _ := filepath.Abs(localDst)
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -184,7 +186,15 @@ func downloadFromVM(vmName, srcPath, localDst string) error {
 			return fmt.Errorf("tar read error: %w", err)
 		}
 
-		target := filepath.Join(localDst, header.Name)
+		// Sanitize: reject paths that escape the destination directory
+		cleanName := filepath.Clean(header.Name)
+		if strings.HasPrefix(cleanName, "..") || filepath.IsAbs(cleanName) {
+			return fmt.Errorf("invalid tar entry path: %s", header.Name)
+		}
+		target := filepath.Join(absDst, cleanName)
+		if !strings.HasPrefix(target, absDst) {
+			return fmt.Errorf("tar entry escapes destination: %s", header.Name)
+		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
