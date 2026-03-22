@@ -17,22 +17,11 @@ var newCmd = &cobra.Command{
 		mustConfig()
 		name := args[0]
 
-		if err := ensureSSHKey(); err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-			os.Exit(1)
-		}
-		pubKey, err := loadInfraboxPubKey()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-			os.Exit(1)
-		}
-
 		fmt.Printf("Creating VM '%s'...\n", name)
 		start := time.Now()
 
 		data, status, err := apiRequest("POST", "/v1/vms", map[string]string{
-			"name":    name,
-			"pub_key": pubKey,
+			"name": name,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
@@ -48,9 +37,8 @@ var newCmd = &cobra.Command{
 		}
 
 		elapsed := int(time.Since(start).Seconds())
-		fmt.Printf("\n✓ Ready (%ds)\n\n", elapsed)
-		fmt.Printf("  SSH:       ib ssh %s\n", vm.Name)
+		fmt.Printf("\nReady (%ds)\n\n", elapsed)
+		fmt.Printf("  Shell:     ib ssh %s\n", vm.Name)
 		fmt.Printf("  HTTPS URL: %s\n\n", vm.IngressURL)
 	},
 }
-

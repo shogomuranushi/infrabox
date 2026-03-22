@@ -33,10 +33,10 @@ var listCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("%-20s %-10s %-40s %s\n", "NAME", "STATE", "SSH", "URL")
-		fmt.Printf("%-20s %-10s %-40s %s\n", "----", "-----", "---", "---")
+		fmt.Printf("%-20s %-10s %s\n", "NAME", "STATE", "URL")
+		fmt.Printf("%-20s %-10s %s\n", "----", "-----", "---")
 		for _, vm := range resp.VMs {
-			fmt.Printf("%-20s %-10s %-40s %s\n", vm.Name, vm.State, vm.SSHCommand, vm.IngressURL)
+			fmt.Printf("%-20s %-10s %s\n", vm.Name, vm.State, vm.IngressURL)
 		}
 	},
 }

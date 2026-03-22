@@ -13,7 +13,7 @@ type VMResponse struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	State      string `json:"state"`
-	SSHCommand string `json:"ssh_command"`
+	ExecURL    string `json:"exec_url"`
 	IngressURL string `json:"ingress_url"`
 	CreatedAt  string `json:"created_at"`
 	Error      string `json:"error,omitempty"`

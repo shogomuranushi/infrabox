@@ -18,10 +18,10 @@ InfraBox gives every engineer their own Linux machine in seconds.
 
 ```bash
 $ ib new my-app
-✓ Ready (7s)
+Ready (7s)
 
-  SSH:  ssh my-app.infra.example.com
-  URL:  https://my-app.infra.example.com  (private)
+  Shell: ib ssh my-app
+  URL:   https://my-app.infra.example.com
 ```
 
 - **Instant web publishing** — every VM gets a public HTTPS URL out of the box
@@ -40,7 +40,8 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 | | Feature |
 |---|---|
 | 🖥️ | VM create / list / delete / restart / rename |
-| 🔑 | SSH access |
+| 🔌 | Shell access via WebSocket (no SSH key management needed) |
+| 📂 | File transfer (upload / download via API) |
 | 🌐 | HTTPS URL auto-provisioning |
 | 🔒 | Private / Public / External sharing |
 | 🔐 | Google Workspace & Entra ID SSO |
@@ -57,18 +58,18 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 ```
 ┌──────────────────────────────────────────────────────┐
 │                        User                          │
-│   ssh my-app.infra.example.com                       │
+│   ib ssh my-app       (WebSocket over HTTPS)         │
 │   https://my-app.infra.example.com                   │
-└───────────────┬──────────────────────┬───────────────┘
-                │ SSH:22               │ HTTPS:443
-                ▼                      ▼
+└──────────────────────┬───────────────────────────────┘
+                       │ HTTPS:443
+                       ▼
 ┌────────────────────────────────────────────────────────┐
 │              Kubernetes Cluster (k3s)                  │
 │                                                        │
 │  API Node (on-demand)                                  │
 │  ┌──────────────────────────────────────────────────┐  │
-│  │  sshpiper ─── ContainerSSH ──▶ InfraBox API     │  │
-│  │  nginx-ingress + cert-manager    Dex (OIDC)      │  │
+│  │  InfraBox API ── K8s exec (SPDY) ──▶ VM Pods    │  │
+│  │  nginx-ingress + cert-manager                    │  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                        │
 │  Worker Node (spot)                                    │
@@ -83,15 +84,30 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 └────────────────────────────────────────────────────────┘
 ```
 
+### How Shell Access Works
+
+InfraBox uses **WebSocket + K8s exec** instead of SSH:
+
+```
+ib ssh myvm
+  → WebSocket (wss://api.example.com/v1/vms/myvm/exec)
+  → API server authenticates via API key
+  → K8s pod exec (SPDY) to the VM container
+  → Interactive bash session
+```
+
+This means:
+- **No SSH keys to manage** — only an API key is needed
+- **No SSH port (2222) exposed** — all traffic goes through HTTPS (443)
+- **No sshpiper or SSH proxy** — fewer moving parts
+
 ### OSS Stack
 
 | Component | OSS | Role |
 |---|---|---|
-| SSH Proxy | [sshpiper](https://github.com/tg123/sshpiper) | Route SSH by VM name |
-| SSH → Pod | [ContainerSSH](https://github.com/ContainerSSH/ContainerSSH) | Spawn/connect to K8s Pod per SSH session |
 | HTTPS Proxy | [ingress-nginx](https://github.com/kubernetes/ingress-nginx) + [cert-manager](https://github.com/cert-manager/cert-manager) | TLS termination, wildcard cert |
-| SSO | [Dex](https://github.com/dexidp/dex) | OIDC broker for Google Workspace / Entra ID |
-| VM Management | InfraBox API (Go) | VM CRUD, quota, access control |
+| SSO | [oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) | Google Workspace / Entra ID auth |
+| VM Management | InfraBox API (Go) | VM CRUD, exec, file transfer, quota |
 
 ---
 
@@ -113,7 +129,7 @@ Or download the binary directly from [Releases](https://github.com/shogomuranush
 ### Set up
 
 ```bash
-ib init   # Enter your API key → SSH key is auto-generated at ~/.ib/id_infrabox
+ib init   # Enter your API key
 ```
 
 ### Create your first VM
@@ -123,20 +139,40 @@ ib new my-app
 ```
 
 ```
-✓ Ready (7s)
+Ready (7s)
 
-  SSH:       ib ssh my-app
+  Shell:     ib ssh my-app
   HTTPS URL: https://my-app.infra.example.com
 ```
 
 ```bash
-ib ssh my-app        # SSH into the VM
-ib scp ./file myvm:/tmp/   # Transfer a file to the VM
-ib list              # List your VMs
-ib rename old new    # Rename a VM
-ib delete my-app     # Delete a VM
-ib upgrade           # Upgrade the CLI to the latest version
+ib ssh my-app              # Open a shell in the VM
+ib scp ./file myvm:/tmp/   # Upload a file to the VM
+ib scp myvm:/tmp/f ./      # Download a file from the VM
+ib list                    # List your VMs
+ib rename old new          # Rename a VM
+ib delete my-app           # Delete a VM
+ib upgrade                 # Upgrade the CLI to the latest version
 ```
+
+---
+
+## API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/v1/keys` | Create an API key |
+| `POST` | `/v1/vms` | Create a VM |
+| `GET` | `/v1/vms` | List VMs |
+| `GET` | `/v1/vms/{name}` | Get VM details |
+| `DELETE` | `/v1/vms/{name}` | Delete a VM |
+| `PATCH` | `/v1/vms/{name}` | Rename a VM |
+| `POST` | `/v1/vms/{name}/restart` | Restart a VM |
+| `GET` | `/v1/vms/{name}/exec` | WebSocket shell session |
+| `POST` | `/v1/vms/{name}/files?path=` | Upload files (tar stream) |
+| `GET` | `/v1/vms/{name}/files?path=` | Download files (tar stream) |
+
+All endpoints except `/healthz` and `/v1/keys` require `X-API-Key` header.
 
 ---
 
@@ -144,10 +180,10 @@ ib upgrade           # Upgrade the CLI to the latest version
 
 | Environment | Status | Setup |
 |---|---|---|
-| Local (macOS + Docker) | ✅ Working | [scripts/local-setup.sh](./scripts/local-setup.sh) |
-| GCE / VPS (k3s) | ✅ Working | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
-| GCE (Terraform) | ✅ Working | [scripts/terraform-gce/](./scripts/terraform-gce/) |
-| GKE / EKS / other managed K8s | 🚧 Coming soon | — |
+| Local (macOS + Docker) | Working | [scripts/local-setup.sh](./scripts/local-setup.sh) |
+| GCE / VPS (k3s) | Working | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
+| GCE (Terraform) | Working | [scripts/terraform-gce/](./scripts/terraform-gce/) |
+| GKE / EKS / other managed K8s | Coming soon | — |
 
 ---
 

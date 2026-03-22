@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssh-server sudo curl wget git vim nano \
+    sudo curl wget git vim nano \
     build-essential python3 python3-pip \
     nodejs npm jq unzip htop tmux \
     ripgrep fd-find fzf zsh \
@@ -24,14 +24,13 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 # Claude Code & Codex
 RUN npm install -g @anthropic-ai/claude-code @openai/codex
 
-# SSH server setup
-RUN mkdir -p /var/run/sshd \
-  && (id ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu) \
+# User setup
+RUN (id ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu) \
   && usermod -s /bin/zsh ubuntu \
   && echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # rclone (Google Drive sync for context sharing)
 RUN curl https://rclone.org/install.sh | bash
 
-EXPOSE 22 8000
-CMD ["/usr/sbin/sshd", "-D"]
+EXPOSE 8000
+CMD ["sleep", "infinity"]

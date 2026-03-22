@@ -90,7 +90,7 @@ fi
 
 SOURCE_RANGES="${ALLOWED_CIDRS:-0.0.0.0/0}"
 
-for rule in "${INSTANCE_NAME}-allow-https" "${INSTANCE_NAME}-allow-ssh" "${INSTANCE_NAME}-allow-api"; do
+for rule in "${INSTANCE_NAME}-allow-https" "${INSTANCE_NAME}-allow-api"; do
   gcloud compute firewall-rules delete "$rule" \
     --project="$GCP_PROJECT" --quiet 2>/dev/null || true
 done
@@ -99,11 +99,6 @@ gcloud compute firewall-rules create "${INSTANCE_NAME}-allow-https" \
   --project="$GCP_PROJECT" \
   --target-tags="${INSTANCE_NAME}-api" \
   --allow=tcp:443,tcp:80 \
-  --source-ranges="$SOURCE_RANGES"
-gcloud compute firewall-rules create "${INSTANCE_NAME}-allow-ssh" \
-  --project="$GCP_PROJECT" \
-  --target-tags="${INSTANCE_NAME}-api" \
-  --allow=tcp:2222 \
   --source-ranges="$SOURCE_RANGES"
 gcloud compute firewall-rules create "${INSTANCE_NAME}-allow-api" \
   --project="$GCP_PROJECT" \
@@ -227,7 +222,6 @@ done
 # Namespaces
 kubectl create ns infrabox     2>/dev/null || true
 kubectl create ns infrabox-vms 2>/dev/null || true
-kubectl create ns sshpiper     2>/dev/null || true
 
 # cert-manager
 if ! kubectl get ns cert-manager &>/dev/null; then
@@ -241,15 +235,6 @@ if ! kubectl get ns ingress-nginx &>/dev/null; then
   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0/deploy/static/provider/baremetal/deploy.yaml
   kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=120s
 fi
-
-# sshpiper
-if ! kubectl get deployment sshpiper -n infrabox &>/dev/null; then
-  kubectl apply -f https://raw.githubusercontent.com/tg123/sshpiper/master/hack/kubernetes/sshpiperd.yaml -n infrabox
-fi
-kubectl patch deployment sshpiper -n infrabox --type='json' -p='[
-  {\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/ports\",
-   \"value\":[{\"containerPort\":2222,\"hostPort\":2222}]}
-]' 2>/dev/null || true
 
 # GCE PD CSI Driver
 kubectl apply -k 'https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver/deploy/kubernetes/overlays/stable/?ref=v1.15.1' 2>/dev/null || true
@@ -283,10 +268,6 @@ for ns_deploy in 'ingress-nginx/ingress-nginx-controller' 'cert-manager/cert-man
      \"value\":[{\"key\":\"infrabox-role\",\"operator\":\"Equal\",\"value\":\"api\",\"effect\":\"NoSchedule\"}]}
   ]' 2>/dev/null || true
 done
-kubectl patch deployment sshpiper -n infrabox --type='json' -p='[
-  {\"op\":\"add\",\"path\":\"/spec/template/spec/tolerations\",
-   \"value\":[{\"key\":\"infrabox-role\",\"operator\":\"Equal\",\"value\":\"api\",\"effect\":\"NoSchedule\"}]}
-]' 2>/dev/null || true
 
 echo 'k8s components ready'
 "
@@ -300,40 +281,11 @@ gcloud compute ssh "$API_NODE" \
 set -e
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
-# sshpiper upstream keypair
-if ! kubectl get secret sshpiper-upstream-key -n infrabox &>/dev/null; then
-  ssh-keygen -t ed25519 -N '' -f /tmp/upstream-key
-  kubectl create secret generic sshpiper-upstream-key \
-    -n infrabox \
-    --from-file=ssh-privatekey=/tmp/upstream-key
-  rm -f /tmp/upstream-key /tmp/upstream-key.pub
-fi
-kubectl get secret sshpiper-upstream-key -n infrabox -o json \
-  | python3 -c \"
-import json,sys
-s=json.load(sys.stdin)
-del s['metadata']['resourceVersion']
-del s['metadata']['uid']
-del s['metadata']['creationTimestamp']
-s['metadata']['namespace']='infrabox-vms'
-print(json.dumps(s))
-\" | kubectl apply -f - 2>/dev/null || true
-
-# sshpiper server key
-if ! kubectl get secret sshpiper-server-key -n infrabox &>/dev/null; then
-  ssh-keygen -t ed25519 -N '' -f /tmp/server-key
-  kubectl create secret generic sshpiper-server-key \
-    -n infrabox \
-    --from-file=ssh-hostkey=/tmp/server-key
-  rm -f /tmp/server-key /tmp/server-key.pub
-fi
-
 # API secret
 kubectl create secret generic infrabox-api-secret \
   -n infrabox \
   --from-literal=api-key='${ADMIN_API_KEY}' \
   --from-literal=ingress-ip='${STATIC_IP}' \
-  --from-literal=sshpiper-ip='${STATIC_IP}' \
   --dry-run=client -o yaml | kubectl apply -f -
 
 echo 'secrets ready'
@@ -574,8 +526,7 @@ echo "   A  $DOMAIN       -> $STATIC_IP"
 echo "   A  *.$DOMAIN     -> $STATIC_IP"
 echo ""
 echo " CLI config (~/.ib/config.yaml):"
-echo "   endpoint:    https://api.${DOMAIN}"
-echo "   sshpiper_ip: ${STATIC_IP}"
+echo "   endpoint: https://api.${DOMAIN}"
 echo ""
 echo " SSH into nodes:"
 echo "   gcloud compute ssh $API_NODE --project=$GCP_PROJECT --zone=$GCP_ZONE"
