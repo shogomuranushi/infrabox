@@ -90,7 +90,7 @@ fi
 
 SOURCE_RANGES="${ALLOWED_CIDRS:-0.0.0.0/0}"
 
-for rule in "${INSTANCE_NAME}-allow-https" "${INSTANCE_NAME}-allow-ssh" "${INSTANCE_NAME}-allow-api"; do
+for rule in "${INSTANCE_NAME}-allow-https" "${INSTANCE_NAME}-allow-api"; do
   gcloud compute firewall-rules delete "$rule" \
     --project="$GCP_PROJECT" --quiet 2>/dev/null || true
 done

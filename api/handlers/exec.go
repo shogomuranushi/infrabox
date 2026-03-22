@@ -6,7 +6,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
-	k8sclient "github.com/shogomuranushi/infra-box/api/k8s"
 )
 
 var upgrader = websocket.Upgrader{
