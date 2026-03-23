@@ -29,15 +29,19 @@ type VMConfig struct {
 	RcloneDriveClientSecret string            // optional: OAuth client secret for rclone Google Drive sync
 }
 
+// sanitizeOwner converts an owner string (typically email) to a value safe for
+// use in Kubernetes namespace names and label values by replacing invalid characters.
+func sanitizeOwner(owner string) string {
+	s := strings.ToLower(owner)
+	return strings.NewReplacer("@", "-", ".", "-", "_", "-").Replace(s)
+}
+
 // UserNamespace returns the per-user namespace name.
-// owner (typically an email address) is sanitized to meet RFC 1123 label requirements.
 func UserNamespace(baseNamespace, owner string) string {
 	if owner == "" {
 		return baseNamespace
 	}
-	sanitized := strings.ToLower(owner)
-	sanitized = strings.NewReplacer("@", "-", ".", "-", "_", "-").Replace(sanitized)
-	return baseNamespace + "-" + sanitized
+	return baseNamespace + "-" + sanitizeOwner(owner)
 }
 
 // EnsureUserNamespace creates the per-user namespace and ResourceQuota if they don't exist.
@@ -344,7 +348,7 @@ func (c *Client) deleteIngress(ctx context.Context, namespace, name string) {
 func vmLabels(name string, owner string) map[string]string {
 	labels := map[string]string{"app": "vm-" + name, "managed-by": "infrabox"}
 	if owner != "" {
-		labels["infrabox-owner"] = owner
+		labels["infrabox-owner"] = sanitizeOwner(owner)
 	}
 	return labels
 }
