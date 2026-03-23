@@ -1,4 +1,5 @@
 FROM golang:1.23-alpine AS builder
+LABEL org.opencontainers.image.source=https://github.com/shogomuranushi/infrabox
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download

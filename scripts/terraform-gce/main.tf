@@ -322,23 +322,29 @@ resource "google_compute_instance" "api" {
       sleep 5
     done
 
+    # Patch kube-system deployments to tolerate the API node taint
+    sleep 30
+    for deploy in coredns local-path-provisioner metrics-server; do
+      kubectl patch deployment "$deploy" -n kube-system --type='json' -p='[
+        {"op":"add","path":"/spec/template/spec/tolerations",
+         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+      ]' 2>/dev/null || true
+    done
+
     # =========================================================
     log "2. Install Docker"
     # =========================================================
     curl -fsSL https://get.docker.com | sh
 
     # =========================================================
-    log "3. Build and import Docker images"
+    log "3. Pull Docker images from GHCR"
     # =========================================================
-    cd /tmp
-    apt-get update -qq && apt-get install -y -qq git
-    git clone --depth 1 https://github.com/shogomuranushi/infrabox.git infrabox-src || true
-    cd infrabox-src
-
-    docker build -t infrabox-base:ubuntu-24.04 -f images/base/Dockerfile images/base/
+    docker pull ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04
+    docker tag ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04 infrabox-base:ubuntu-24.04
     docker save infrabox-base:ubuntu-24.04 | k3s ctr images import -
 
-    docker build -t infrabox-api:latest -f api/Dockerfile api/
+    docker pull ghcr.io/shogomuranushi/infrabox-api:latest
+    docker tag ghcr.io/shogomuranushi/infrabox-api:latest infrabox-api:latest
     docker save infrabox-api:latest | k3s ctr images import -
 
     # =========================================================
@@ -350,39 +356,81 @@ resource "google_compute_instance" "api" {
     # =========================================================
     log "5. Install cert-manager"
     # =========================================================
-    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
-    # Patch tolerations immediately so pods can schedule on API node (tainted with infrabox-role=api:NoSchedule)
-    sleep 5
-    for deploy in cert-manager cert-manager-webhook cert-manager-cainjector; do
-      kubectl patch deployment "$deploy" -n cert-manager --type='json' -p='[
-        {"op":"add","path":"/spec/template/spec/tolerations",
-         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
-      ]' 2>/dev/null || true
-    done
-    kubectl -n cert-manager rollout status deploy/cert-manager --timeout=180s
-    kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=180s
+    command -v helm &>/dev/null || curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    helm repo add jetstack https://charts.jetstack.io --force-update
+    helm upgrade --install cert-manager jetstack/cert-manager \
+      --namespace cert-manager --create-namespace \
+      --version v1.16.2 \
+      --set crds.enabled=true \
+      --set-json 'tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --set-json 'webhook.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --set-json 'cainjector.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --wait --timeout 5m
 
     # =========================================================
     log "6. Install nginx-ingress"
     # =========================================================
-    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0/deploy/static/provider/baremetal/deploy.yaml
-    # Patch toleration + hostPort so pod can schedule on API node and bind 80/443 directly
-    sleep 5
-    kubectl patch deployment ingress-nginx-controller -n ingress-nginx --type='json' -p='[
-      {"op":"add","path":"/spec/template/spec/tolerations",
-       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]},
-      {"op":"replace","path":"/spec/template/spec/containers/0/ports",
-       "value":[
-         {"name":"http","containerPort":80,"hostPort":80,"protocol":"TCP"},
-         {"name":"https","containerPort":443,"hostPort":443,"protocol":"TCP"}
-       ]}
-    ]' 2>/dev/null || true
-    kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
+    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx --force-update
+    helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+      --namespace ingress-nginx --create-namespace \
+      --set controller.hostPort.enabled=true \
+      --set controller.service.type=ClusterIP \
+      --set admissionWebhooks.enabled=false \
+      --set-json 'controller.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --wait --timeout 5m
 
     # =========================================================
     log "7. Install GCE PD CSI Driver"
     # =========================================================
-    kubectl apply -k "https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver/deploy/kubernetes/overlays/stable/?ref=v1.15.1"
+    # Download tarball (kubectl apply -k with ?ref= URL not supported by kustomize v5)
+    rm -rf /tmp/gcp-csi-driver && mkdir /tmp/gcp-csi-driver
+    curl -sL https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver/archive/refs/tags/v1.15.1.tar.gz \
+      | tar xz -C /tmp/gcp-csi-driver --strip-components=1
+    # cloud-sa secret required by CSI driver (GCE workload identity handles actual auth)
+    kubectl create namespace gce-pd-csi-driver 2>/dev/null || true
+    # cloud-sa secret is required in both kube-system (node daemonset) and
+    # gce-pd-csi-driver (controller deployment) namespaces
+    for ns in kube-system gce-pd-csi-driver; do
+      kubectl create secret generic cloud-sa -n "$ns" \
+        --from-literal=cloud-sa.json='{}' \
+        --dry-run=client -o yaml | kubectl apply -f -
+    done
+    # Create a kustomize overlay that adds tolerations declaratively
+    mkdir -p /tmp/gcp-csi-overlay
+    cat > /tmp/gcp-csi-overlay/kustomization.yaml << 'KUST'
+resources:
+  - ../gcp-csi-driver/deploy/kubernetes/overlays/stable-master
+patches:
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: csi-gce-pd-controller
+        namespace: gce-pd-csi-driver
+      spec:
+        template:
+          spec:
+            tolerations:
+              - key: infrabox-role
+                operator: Equal
+                value: api
+                effect: NoSchedule
+  - patch: |
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: csi-gce-pd-node
+        namespace: gce-pd-csi-driver
+      spec:
+        template:
+          spec:
+            tolerations:
+              - key: infrabox-role
+                operator: Equal
+                value: api
+                effect: NoSchedule
+  KUST
+    kubectl apply -k /tmp/gcp-csi-overlay/
 
     # Wait for CSI driver to be ready
     for i in $(seq 1 30); do
@@ -402,7 +450,7 @@ resource "google_compute_instance" "api" {
     reclaimPolicy: Delete
     volumeBindingMode: WaitForFirstConsumer
     allowVolumeExpansion: true
-    EOF
+  EOF
 
     # =========================================================
     log "8. Create secrets"
@@ -420,10 +468,8 @@ resource "google_compute_instance" "api" {
     kubectl apply -f k8s/rbac.yaml
     kubectl apply -f k8s/api-deployment.yaml
 
-    # Add tolerations so API pod runs on the tainted API node
+    # Pin API pod to the API node (toleration is declared in api-deployment.yaml)
     kubectl patch deployment infrabox-api -n infrabox --type='json' -p='[
-      {"op":"add","path":"/spec/template/spec/tolerations",
-       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]},
       {"op":"add","path":"/spec/template/spec/nodeSelector",
        "value":{"infrabox-role":"api"}}
     ]'
@@ -457,7 +503,14 @@ resource "google_compute_instance" "api" {
         - http01:
             ingress:
               class: nginx
-    EOF
+              podTemplate:
+                spec:
+                  tolerations:
+                  - key: infrabox-role
+                    operator: Equal
+                    value: api
+                    effect: NoSchedule
+  EOF
 
     sed "s/API_DOMAIN_PLACEHOLDER/api.$DOMAIN/g" k8s/api-ingress.yaml \
       | kubectl apply -f -
@@ -479,12 +532,6 @@ resource "google_compute_instance" "api" {
 
       sed "s/AUTH_DOMAIN_PLACEHOLDER/$AUTH_DOMAIN/g" k8s/oauth2-proxy.yaml \
         | kubectl apply -f -
-
-      # Add toleration for API node
-      kubectl patch deployment oauth2-proxy -n infrabox --type='json' -p='[
-        {"op":"add","path":"/spec/template/spec/tolerations",
-         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
-      ]' 2>/dev/null || true
 
       sed -e "s/API_DOMAIN_PLACEHOLDER/api.$DOMAIN/g" \
           -e "s/AUTH_DOMAIN_PLACEHOLDER/$AUTH_DOMAIN/g" \
@@ -571,14 +618,10 @@ resource "google_compute_instance_template" "worker" {
       curl -fsSL https://get.docker.com | sh
 
       # =========================================================
-      log "3. Build and import base image"
+      log "3. Pull base image from GHCR"
       # =========================================================
-      cd /tmp
-      apt-get update -qq && apt-get install -y -qq git
-      git clone --depth 1 https://github.com/shogomuranushi/infrabox.git infrabox-src
-      cd infrabox-src
-
-      docker build -t infrabox-base:ubuntu-24.04 -f images/base/Dockerfile images/base/
+      docker pull ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04
+      docker tag ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04 infrabox-base:ubuntu-24.04
       docker save infrabox-base:ubuntu-24.04 | k3s ctr images import -
 
       log "Worker setup complete!"

@@ -10,6 +10,8 @@ metadata:
     nginx.ingress.kubernetes.io/auth-url: "https://AUTH_DOMAIN_PLACEHOLDER/oauth2/auth"
     nginx.ingress.kubernetes.io/auth-signin: "https://AUTH_DOMAIN_PLACEHOLDER/oauth2/start?rd=https%3A%2F%2F$host$escaped_request_uri"
     nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-Email,X-Auth-Request-User"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_clear_input_headers "X-Auth-Request-Email" "X-Auth-Request-User";
 spec:
   ingressClassName: nginx
   rules:
