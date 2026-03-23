@@ -348,13 +348,18 @@ resource "google_compute_instance" "api" {
     docker save infrabox-api:latest | k3s ctr images import -
 
     # =========================================================
-    log "4. Create namespaces"
+    log "4. Clone repo for k8s manifests"
+    # =========================================================
+    git clone --depth=1 https://github.com/shogomuranushi/infrabox.git /tmp/infrabox-src
+
+    # =========================================================
+    log "6. Create namespaces"
     # =========================================================
     kubectl create ns infrabox     2>/dev/null || true
     kubectl create ns infrabox-vms 2>/dev/null || true
 
     # =========================================================
-    log "5. Install cert-manager"
+    log "7. Install cert-manager"
     # =========================================================
     command -v helm &>/dev/null || curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
     helm repo add jetstack https://charts.jetstack.io --force-update
@@ -369,7 +374,7 @@ resource "google_compute_instance" "api" {
       --wait --timeout 5m
 
     # =========================================================
-    log "6. Install nginx-ingress"
+    log "8. Install nginx-ingress"
     # =========================================================
     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx --force-update
     helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
@@ -381,7 +386,7 @@ resource "google_compute_instance" "api" {
       --wait --timeout 5m
 
     # =========================================================
-    log "7. Install GCE PD CSI Driver"
+    log "9. Install GCE PD CSI Driver"
     # =========================================================
     # Download tarball (kubectl apply -k with ?ref= URL not supported by kustomize v5)
     rm -rf /tmp/gcp-csi-driver && mkdir /tmp/gcp-csi-driver
@@ -454,7 +459,7 @@ resource "google_compute_instance" "api" {
   EOF
 
     # =========================================================
-    log "8. Create secrets"
+    log "10. Create secrets"
     # =========================================================
     kubectl create secret generic infrabox-api-secret \
       -n infrabox \
@@ -463,7 +468,7 @@ resource "google_compute_instance" "api" {
       --dry-run=client -o yaml | kubectl apply -f -
 
     # =========================================================
-    log "9. Deploy infrabox-api"
+    log "11. Deploy infrabox-api"
     # =========================================================
     cd /tmp/infrabox-src
     kubectl apply -f k8s/rbac.yaml
@@ -517,7 +522,7 @@ resource "google_compute_instance" "api" {
       | kubectl apply -f -
 
     # =========================================================
-    log "10. oauth2-proxy (optional)"
+    log "12. oauth2-proxy (optional)"
     # =========================================================
     if [ -n "$OAUTH_CLIENT_ID" ]; then
       COOKIE_SECRET=$(openssl rand -base64 32 | tr -d '\n')
