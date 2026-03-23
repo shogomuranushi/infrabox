@@ -399,37 +399,37 @@ resource "google_compute_instance" "api" {
     # Create a kustomize overlay that adds tolerations declaratively
     mkdir -p /tmp/gcp-csi-overlay
     cat > /tmp/gcp-csi-overlay/kustomization.yaml << 'KUST'
-resources:
-  - ../gcp-csi-driver/deploy/kubernetes/overlays/stable-master
-patches:
-  - patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: csi-gce-pd-controller
-        namespace: gce-pd-csi-driver
-      spec:
-        template:
-          spec:
-            tolerations:
-              - key: infrabox-role
-                operator: Equal
-                value: api
-                effect: NoSchedule
-  - patch: |
-      apiVersion: apps/v1
-      kind: DaemonSet
-      metadata:
-        name: csi-gce-pd-node
-        namespace: gce-pd-csi-driver
-      spec:
-        template:
-          spec:
-            tolerations:
-              - key: infrabox-role
-                operator: Equal
-                value: api
-                effect: NoSchedule
+  resources:
+    - ../gcp-csi-driver/deploy/kubernetes/overlays/stable-master
+  patches:
+    - patch: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: csi-gce-pd-controller
+          namespace: gce-pd-csi-driver
+        spec:
+          template:
+            spec:
+              tolerations:
+                - key: infrabox-role
+                  operator: Equal
+                  value: api
+                  effect: NoSchedule
+    - patch: |
+        apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: csi-gce-pd-node
+          namespace: gce-pd-csi-driver
+        spec:
+          template:
+            spec:
+              tolerations:
+                - key: infrabox-role
+                  operator: Equal
+                  value: api
+                  effect: NoSchedule
   KUST
     kubectl apply -k /tmp/gcp-csi-overlay/
 
