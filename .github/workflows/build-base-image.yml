@@ -10,6 +10,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/infrabox-base
+  # Default values matching terraform-gce defaults (instance_name=infrabox, gcp_zone=asia-northeast1-a)
+  WORKER_MIG_NAME: infrabox-worker-mig
+  GCE_ZONE: asia-northeast1-a
 
 jobs:
   build-and-push:
@@ -25,7 +28,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -53,7 +56,7 @@ jobs:
           script: |
             set -euo pipefail
             gcloud compute instance-groups managed rolling-action replace \
-              ${{ secrets.GCE_WORKER_MIG_NAME }} \
-              --zone=${{ secrets.GCE_ZONE }} \
+              ${{ env.WORKER_MIG_NAME }} \
+              --zone=${{ env.GCE_ZONE }} \
               --max-surge=1 \
               --max-unavailable=0
