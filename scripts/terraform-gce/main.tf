@@ -328,17 +328,14 @@ resource "google_compute_instance" "api" {
     curl -fsSL https://get.docker.com | sh
 
     # =========================================================
-    log "3. Build and import Docker images"
+    log "3. Pull Docker images from GHCR"
     # =========================================================
-    cd /tmp
-    apt-get update -qq && apt-get install -y -qq git
-    git clone --depth 1 https://github.com/shogomuranushi/infrabox.git infrabox-src || true
-    cd infrabox-src
-
-    docker build -t infrabox-base:ubuntu-24.04 -f images/base/Dockerfile images/base/
+    docker pull ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04
+    docker tag ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04 infrabox-base:ubuntu-24.04
     docker save infrabox-base:ubuntu-24.04 | k3s ctr images import -
 
-    docker build -t infrabox-api:latest -f api/Dockerfile api/
+    docker pull ghcr.io/shogomuranushi/infrabox-api:latest
+    docker tag ghcr.io/shogomuranushi/infrabox-api:latest infrabox-api:latest
     docker save infrabox-api:latest | k3s ctr images import -
 
     # =========================================================
@@ -571,14 +568,10 @@ resource "google_compute_instance_template" "worker" {
       curl -fsSL https://get.docker.com | sh
 
       # =========================================================
-      log "3. Build and import base image"
+      log "3. Pull base image from GHCR"
       # =========================================================
-      cd /tmp
-      apt-get update -qq && apt-get install -y -qq git
-      git clone --depth 1 https://github.com/shogomuranushi/infrabox.git infrabox-src
-      cd infrabox-src
-
-      docker build -t infrabox-base:ubuntu-24.04 -f images/base/Dockerfile images/base/
+      docker pull ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04
+      docker tag ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04 infrabox-base:ubuntu-24.04
       docker save infrabox-base:ubuntu-24.04 | k3s ctr images import -
 
       log "Worker setup complete!"
