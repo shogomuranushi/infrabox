@@ -405,9 +405,13 @@ resource "google_compute_instance" "api" {
       | tar xz -C /tmp/gcp-csi-driver --strip-components=1
     # cloud-sa secret required by CSI driver (GCE workload identity handles actual auth)
     kubectl create namespace gce-pd-csi-driver 2>/dev/null || true
-    kubectl create secret generic cloud-sa -n kube-system \
-      --from-literal=cloud-sa.json='{}' \
-      --dry-run=client -o yaml | kubectl apply -f -
+    # cloud-sa secret is required in both kube-system (node daemonset) and
+    # gce-pd-csi-driver (controller deployment) namespaces
+    for ns in kube-system gce-pd-csi-driver; do
+      kubectl create secret generic cloud-sa -n "$ns" \
+        --from-literal=cloud-sa.json='{}' \
+        --dry-run=client -o yaml | kubectl apply -f -
+    done
     kubectl apply -k /tmp/gcp-csi-driver/deploy/kubernetes/overlays/stable-master/
     # Patch CSI pods to tolerate API node taint
     sleep 10
