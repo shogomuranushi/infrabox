@@ -365,6 +365,7 @@ resource "google_compute_instance" "api" {
       --set-json 'tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --set-json 'webhook.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --set-json 'cainjector.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --set-json 'startupapicheck.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --wait --timeout 5m
 
     # =========================================================
@@ -375,7 +376,7 @@ resource "google_compute_instance" "api" {
       --namespace ingress-nginx --create-namespace \
       --set controller.hostPort.enabled=true \
       --set controller.service.type=ClusterIP \
-      --set admissionWebhooks.enabled=false \
+      --set controller.admissionWebhooks.enabled=false \
       --set-json 'controller.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --wait --timeout 5m
 
