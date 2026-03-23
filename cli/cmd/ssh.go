@@ -7,9 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
-	"syscall"
-
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -53,14 +50,8 @@ var sshCmd = &cobra.Command{
 		// Send initial terminal size
 		sendTermSize(conn)
 
-		// Handle SIGWINCH for terminal resize
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGWINCH)
-		go func() {
-			for range sigCh {
-				sendTermSize(conn)
-			}
-		}()
+		// Handle terminal resize (platform-specific)
+		watchResize(conn)
 
 		// Read from WebSocket → stdout
 		done := make(chan struct{})
