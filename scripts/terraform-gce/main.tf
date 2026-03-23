@@ -604,6 +604,14 @@ resource "google_compute_instance_template" "worker" {
 
       log() { echo "=== $(date '+%H:%M:%S') $* ==="; }
 
+      # Skip setup on subsequent boots (after preemption/restart).
+      # Reinstalling k3s regenerates /etc/rancher/node/password, which causes
+      # "Node password rejected" errors against the existing server entry.
+      if [ -f /usr/local/bin/k3s ]; then
+        log "k3s already installed, skipping setup"
+        exit 0
+      fi
+
       K3S_TOKEN="${local.k3s_token}"
       # Use internal IP for API server (external IP port 6443 is not exposed via firewall)
       API_IP="${google_compute_instance.api.network_interface[0].network_ip}"
