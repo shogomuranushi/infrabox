@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -29,11 +30,14 @@ type VMConfig struct {
 }
 
 // UserNamespace returns the per-user namespace name.
+// owner (typically an email address) is sanitized to meet RFC 1123 label requirements.
 func UserNamespace(baseNamespace, owner string) string {
 	if owner == "" {
 		return baseNamespace
 	}
-	return baseNamespace + "-" + owner
+	sanitized := strings.ToLower(owner)
+	sanitized = strings.NewReplacer("@", "-", ".", "-", "_", "-").Replace(sanitized)
+	return baseNamespace + "-" + sanitized
 }
 
 // EnsureUserNamespace creates the per-user namespace and ResourceQuota if they don't exist.

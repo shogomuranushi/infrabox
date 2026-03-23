@@ -348,13 +348,18 @@ resource "google_compute_instance" "api" {
     docker save infrabox-api:latest | k3s ctr images import -
 
     # =========================================================
-    log "4. Create namespaces"
+    log "4. Clone repo for k8s manifests"
+    # =========================================================
+    git clone --depth=1 https://github.com/shogomuranushi/infrabox.git /tmp/infrabox-src
+
+    # =========================================================
+    log "6. Create namespaces"
     # =========================================================
     kubectl create ns infrabox     2>/dev/null || true
     kubectl create ns infrabox-vms 2>/dev/null || true
 
     # =========================================================
-    log "5. Install cert-manager"
+    log "7. Install cert-manager"
     # =========================================================
     command -v helm &>/dev/null || curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
     helm repo add jetstack https://charts.jetstack.io --force-update
@@ -365,22 +370,23 @@ resource "google_compute_instance" "api" {
       --set-json 'tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --set-json 'webhook.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --set-json 'cainjector.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --set-json 'startupapicheck.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --wait --timeout 5m
 
     # =========================================================
-    log "6. Install nginx-ingress"
+    log "8. Install nginx-ingress"
     # =========================================================
     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx --force-update
     helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
       --namespace ingress-nginx --create-namespace \
       --set controller.hostPort.enabled=true \
       --set controller.service.type=ClusterIP \
-      --set admissionWebhooks.enabled=false \
+      --set controller.admissionWebhooks.enabled=false \
       --set-json 'controller.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --wait --timeout 5m
 
     # =========================================================
-    log "7. Install GCE PD CSI Driver"
+    log "9. Install GCE PD CSI Driver"
     # =========================================================
     # Download tarball (kubectl apply -k with ?ref= URL not supported by kustomize v5)
     rm -rf /tmp/gcp-csi-driver && mkdir /tmp/gcp-csi-driver
@@ -398,37 +404,37 @@ resource "google_compute_instance" "api" {
     # Create a kustomize overlay that adds tolerations declaratively
     mkdir -p /tmp/gcp-csi-overlay
     cat > /tmp/gcp-csi-overlay/kustomization.yaml << 'KUST'
-resources:
-  - ../gcp-csi-driver/deploy/kubernetes/overlays/stable-master
-patches:
-  - patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: csi-gce-pd-controller
-        namespace: gce-pd-csi-driver
-      spec:
-        template:
-          spec:
-            tolerations:
-              - key: infrabox-role
-                operator: Equal
-                value: api
-                effect: NoSchedule
-  - patch: |
-      apiVersion: apps/v1
-      kind: DaemonSet
-      metadata:
-        name: csi-gce-pd-node
-        namespace: gce-pd-csi-driver
-      spec:
-        template:
-          spec:
-            tolerations:
-              - key: infrabox-role
-                operator: Equal
-                value: api
-                effect: NoSchedule
+  resources:
+    - ../gcp-csi-driver/deploy/kubernetes/overlays/stable-master
+  patches:
+    - patch: |
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: csi-gce-pd-controller
+          namespace: gce-pd-csi-driver
+        spec:
+          template:
+            spec:
+              tolerations:
+                - key: infrabox-role
+                  operator: Equal
+                  value: api
+                  effect: NoSchedule
+    - patch: |
+        apiVersion: apps/v1
+        kind: DaemonSet
+        metadata:
+          name: csi-gce-pd-node
+          namespace: gce-pd-csi-driver
+        spec:
+          template:
+            spec:
+              tolerations:
+                - key: infrabox-role
+                  operator: Equal
+                  value: api
+                  effect: NoSchedule
   KUST
     kubectl apply -k /tmp/gcp-csi-overlay/
 
@@ -453,7 +459,7 @@ patches:
   EOF
 
     # =========================================================
-    log "8. Create secrets"
+    log "10. Create secrets"
     # =========================================================
     kubectl create secret generic infrabox-api-secret \
       -n infrabox \
@@ -462,7 +468,7 @@ patches:
       --dry-run=client -o yaml | kubectl apply -f -
 
     # =========================================================
-    log "9. Deploy infrabox-api"
+    log "11. Deploy infrabox-api"
     # =========================================================
     cd /tmp/infrabox-src
     kubectl apply -f k8s/rbac.yaml
@@ -516,7 +522,7 @@ patches:
       | kubectl apply -f -
 
     # =========================================================
-    log "10. oauth2-proxy (optional)"
+    log "12. oauth2-proxy (optional)"
     # =========================================================
     if [ -n "$OAUTH_CLIENT_ID" ]; then
       COOKIE_SECRET=$(openssl rand -base64 32 | tr -d '\n')
