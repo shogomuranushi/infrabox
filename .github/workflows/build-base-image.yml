@@ -38,3 +38,22 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  replace-workers:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Rolling replace worker MIG via API node
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.GCE_HOST }}
+          username: ${{ secrets.GCE_USER }}
+          key: ${{ secrets.GCE_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            gcloud compute instance-groups managed rolling-action replace \
+              ${{ secrets.GCE_WORKER_MIG_NAME }} \
+              --zone=${{ secrets.GCE_ZONE }} \
+              --max-surge=1 \
+              --max-unavailable=0
