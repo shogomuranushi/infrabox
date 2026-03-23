@@ -24,7 +24,12 @@ type VMListResponse struct {
 }
 
 func apiRequest(method, path string, body interface{}) ([]byte, int, error) {
-	return doRequest(method, path, body, cfg.APIKey)
+	data, status, err := doRequest(method, path, body, cfg.APIKey)
+	if status == http.StatusUnauthorized {
+		fmt.Fprintln(os.Stderr, "ERROR: API key is invalid or expired. Run 'ib init' to set a new key.")
+		os.Exit(1)
+	}
+	return data, status, err
 }
 
 func apiRequestNoAuth(method, path string, body interface{}) ([]byte, int, error) {
@@ -66,3 +71,4 @@ func mustConfig() {
 		os.Exit(1)
 	}
 }
+

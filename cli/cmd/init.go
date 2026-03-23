@@ -12,7 +12,7 @@ import (
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Set up API key for first-time use",
+	Short: "Set up or refresh API key",
 	Run: func(cmd *cobra.Command, args []string) {
 		reader := bufio.NewReader(os.Stdin)
 
@@ -25,6 +25,8 @@ var initCmd = &cobra.Command{
 				os.Exit(1)
 			}
 			cfg.Endpoint = ep
+		} else {
+			fmt.Printf("Endpoint: %s\n", cfg.Endpoint)
 		}
 
 		keysURL := strings.TrimRight(cfg.Endpoint, "/") + "/v1/keys"
