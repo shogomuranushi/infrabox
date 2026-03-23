@@ -322,6 +322,15 @@ resource "google_compute_instance" "api" {
       sleep 5
     done
 
+    # Patch kube-system deployments to tolerate the API node taint
+    sleep 30
+    for deploy in coredns local-path-provisioner metrics-server; do
+      kubectl patch deployment "$deploy" -n kube-system --type='json' -p='[
+        {"op":"add","path":"/spec/template/spec/tolerations",
+         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+      ]' 2>/dev/null || true
+    done
+
     # =========================================================
     log "2. Install Docker"
     # =========================================================
@@ -374,12 +383,42 @@ resource "google_compute_instance" "api" {
          {"name":"https","containerPort":443,"hostPort":443,"protocol":"TCP"}
        ]}
     ]' 2>/dev/null || true
-    kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
+    # Delete admission webhook (admission jobs cannot be scheduled without tolerations;
+    # the webhook is not required for basic nginx-ingress operation)
+    kubectl delete validatingwebhookconfiguration ingress-nginx-admission 2>/dev/null || true
+    # Create a self-signed TLS secret so the controller can start
+    # (normally created by admission jobs, but those are pending without tolerations)
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+      -keyout /tmp/nginx-tls.key -out /tmp/nginx-tls.crt \
+      -subj "/CN=ingress-nginx-admission/O=ingress-nginx-admission" 2>/dev/null
+    kubectl create secret tls ingress-nginx-admission \
+      -n ingress-nginx --key=/tmp/nginx-tls.key --cert=/tmp/nginx-tls.crt \
+      --dry-run=client -o yaml | kubectl apply -f -
+    kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s
 
     # =========================================================
     log "7. Install GCE PD CSI Driver"
     # =========================================================
-    kubectl apply -k "https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver/deploy/kubernetes/overlays/stable/?ref=v1.15.1"
+    # Download tarball (kubectl apply -k with ?ref= URL not supported by kustomize v5)
+    rm -rf /tmp/gcp-csi-driver && mkdir /tmp/gcp-csi-driver
+    curl -sL https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver/archive/refs/tags/v1.15.1.tar.gz \
+      | tar xz -C /tmp/gcp-csi-driver --strip-components=1
+    # cloud-sa secret required by CSI driver (GCE workload identity handles actual auth)
+    kubectl create namespace gce-pd-csi-driver 2>/dev/null || true
+    kubectl create secret generic cloud-sa -n kube-system \
+      --from-literal=cloud-sa.json='{}' \
+      --dry-run=client -o yaml | kubectl apply -f -
+    kubectl apply -k /tmp/gcp-csi-driver/deploy/kubernetes/overlays/stable-master/
+    # Patch CSI pods to tolerate API node taint
+    sleep 10
+    kubectl patch daemonset csi-gce-pd-node -n gce-pd-csi-driver --type='json' -p='[
+      {"op":"add","path":"/spec/template/spec/tolerations",
+       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+    ]' 2>/dev/null || true
+    kubectl patch deployment csi-gce-pd-controller -n gce-pd-csi-driver --type='json' -p='[
+      {"op":"add","path":"/spec/template/spec/tolerations",
+       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
+    ]' 2>/dev/null || true
 
     # Wait for CSI driver to be ready
     for i in $(seq 1 30); do
@@ -454,6 +493,13 @@ resource "google_compute_instance" "api" {
         - http01:
             ingress:
               class: nginx
+              podTemplate:
+                spec:
+                  tolerations:
+                  - key: infrabox-role
+                    operator: Equal
+                    value: api
+                    effect: NoSchedule
     EOF
 
     sed "s/API_DOMAIN_PLACEHOLDER/api.$DOMAIN/g" k8s/api-ingress.yaml \
