@@ -14,6 +14,11 @@ spec:
         app: infrabox-api
     spec:
       serviceAccountName: infrabox-api
+      tolerations:
+        - key: infrabox-role
+          operator: Equal
+          value: api
+          effect: NoSchedule
       containers:
         - name: api
           image: infrabox-api:latest

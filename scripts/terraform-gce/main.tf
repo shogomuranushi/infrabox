@@ -356,45 +356,28 @@ resource "google_compute_instance" "api" {
     # =========================================================
     log "5. Install cert-manager"
     # =========================================================
-    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
-    # Patch tolerations immediately so pods can schedule on API node (tainted with infrabox-role=api:NoSchedule)
-    sleep 5
-    for deploy in cert-manager cert-manager-webhook cert-manager-cainjector; do
-      kubectl patch deployment "$deploy" -n cert-manager --type='json' -p='[
-        {"op":"add","path":"/spec/template/spec/tolerations",
-         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
-      ]' 2>/dev/null || true
-    done
-    kubectl -n cert-manager rollout status deploy/cert-manager --timeout=180s
-    kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=180s
+    command -v helm &>/dev/null || curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    helm repo add jetstack https://charts.jetstack.io --force-update
+    helm upgrade --install cert-manager jetstack/cert-manager \
+      --namespace cert-manager --create-namespace \
+      --version v1.16.2 \
+      --set crds.enabled=true \
+      --set-json 'tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --set-json 'webhook.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --set-json 'cainjector.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --wait --timeout 5m
 
     # =========================================================
     log "6. Install nginx-ingress"
     # =========================================================
-    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.0/deploy/static/provider/baremetal/deploy.yaml
-    # Patch toleration + hostPort so pod can schedule on API node and bind 80/443 directly
-    sleep 5
-    kubectl patch deployment ingress-nginx-controller -n ingress-nginx --type='json' -p='[
-      {"op":"add","path":"/spec/template/spec/tolerations",
-       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]},
-      {"op":"replace","path":"/spec/template/spec/containers/0/ports",
-       "value":[
-         {"name":"http","containerPort":80,"hostPort":80,"protocol":"TCP"},
-         {"name":"https","containerPort":443,"hostPort":443,"protocol":"TCP"}
-       ]}
-    ]' 2>/dev/null || true
-    # Delete admission webhook (admission jobs cannot be scheduled without tolerations;
-    # the webhook is not required for basic nginx-ingress operation)
-    kubectl delete validatingwebhookconfiguration ingress-nginx-admission 2>/dev/null || true
-    # Create a self-signed TLS secret so the controller can start
-    # (normally created by admission jobs, but those are pending without tolerations)
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-      -keyout /tmp/nginx-tls.key -out /tmp/nginx-tls.crt \
-      -subj "/CN=ingress-nginx-admission/O=ingress-nginx-admission" 2>/dev/null
-    kubectl create secret tls ingress-nginx-admission \
-      -n ingress-nginx --key=/tmp/nginx-tls.key --cert=/tmp/nginx-tls.crt \
-      --dry-run=client -o yaml | kubectl apply -f -
-    kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s
+    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx --force-update
+    helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+      --namespace ingress-nginx --create-namespace \
+      --set controller.hostPort.enabled=true \
+      --set controller.service.type=ClusterIP \
+      --set admissionWebhooks.enabled=false \
+      --set-json 'controller.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --wait --timeout 5m
 
     # =========================================================
     log "7. Install GCE PD CSI Driver"
@@ -412,17 +395,42 @@ resource "google_compute_instance" "api" {
         --from-literal=cloud-sa.json='{}' \
         --dry-run=client -o yaml | kubectl apply -f -
     done
-    kubectl apply -k /tmp/gcp-csi-driver/deploy/kubernetes/overlays/stable-master/
-    # Patch CSI pods to tolerate API node taint
-    sleep 10
-    kubectl patch daemonset csi-gce-pd-node -n gce-pd-csi-driver --type='json' -p='[
-      {"op":"add","path":"/spec/template/spec/tolerations",
-       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
-    ]' 2>/dev/null || true
-    kubectl patch deployment csi-gce-pd-controller -n gce-pd-csi-driver --type='json' -p='[
-      {"op":"add","path":"/spec/template/spec/tolerations",
-       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
-    ]' 2>/dev/null || true
+    # Create a kustomize overlay that adds tolerations declaratively
+    mkdir -p /tmp/gcp-csi-overlay
+    cat > /tmp/gcp-csi-overlay/kustomization.yaml << 'KUST'
+resources:
+  - ../gcp-csi-driver/deploy/kubernetes/overlays/stable-master
+patches:
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: csi-gce-pd-controller
+        namespace: gce-pd-csi-driver
+      spec:
+        template:
+          spec:
+            tolerations:
+              - key: infrabox-role
+                operator: Equal
+                value: api
+                effect: NoSchedule
+  - patch: |
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: csi-gce-pd-node
+        namespace: gce-pd-csi-driver
+      spec:
+        template:
+          spec:
+            tolerations:
+              - key: infrabox-role
+                operator: Equal
+                value: api
+                effect: NoSchedule
+  KUST
+    kubectl apply -k /tmp/gcp-csi-overlay/
 
     # Wait for CSI driver to be ready
     for i in $(seq 1 30); do
@@ -442,7 +450,7 @@ resource "google_compute_instance" "api" {
     reclaimPolicy: Delete
     volumeBindingMode: WaitForFirstConsumer
     allowVolumeExpansion: true
-    EOF
+  EOF
 
     # =========================================================
     log "8. Create secrets"
@@ -460,10 +468,8 @@ resource "google_compute_instance" "api" {
     kubectl apply -f k8s/rbac.yaml
     kubectl apply -f k8s/api-deployment.yaml
 
-    # Add tolerations so API pod runs on the tainted API node
+    # Pin API pod to the API node (toleration is declared in api-deployment.yaml)
     kubectl patch deployment infrabox-api -n infrabox --type='json' -p='[
-      {"op":"add","path":"/spec/template/spec/tolerations",
-       "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]},
       {"op":"add","path":"/spec/template/spec/nodeSelector",
        "value":{"infrabox-role":"api"}}
     ]'
@@ -504,7 +510,7 @@ resource "google_compute_instance" "api" {
                     operator: Equal
                     value: api
                     effect: NoSchedule
-    EOF
+  EOF
 
     sed "s/API_DOMAIN_PLACEHOLDER/api.$DOMAIN/g" k8s/api-ingress.yaml \
       | kubectl apply -f -
@@ -526,12 +532,6 @@ resource "google_compute_instance" "api" {
 
       sed "s/AUTH_DOMAIN_PLACEHOLDER/$AUTH_DOMAIN/g" k8s/oauth2-proxy.yaml \
         | kubectl apply -f -
-
-      # Add toleration for API node
-      kubectl patch deployment oauth2-proxy -n infrabox --type='json' -p='[
-        {"op":"add","path":"/spec/template/spec/tolerations",
-         "value":[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]}
-      ]' 2>/dev/null || true
 
       sed -e "s/API_DOMAIN_PLACEHOLDER/api.$DOMAIN/g" \
           -e "s/AUTH_DOMAIN_PLACEHOLDER/$AUTH_DOMAIN/g" \
