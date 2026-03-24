@@ -77,11 +77,14 @@ func fetchLatestVersion() (string, error) {
 }
 
 // isNewer reports whether latest is a newer version than current.
+// Strips leading "v" before comparing so "v0.2.7" == "0.2.7".
 func isNewer(latest, current string) bool {
-	if latest == current || latest == "" || current == "dev" {
+	if latest == "" || current == "dev" {
 		return false
 	}
-	return latest != current
+	l := strings.TrimPrefix(latest, "v")
+	c := strings.TrimPrefix(current, "v")
+	return l != c
 }
 
 func checkFilePath() string {
