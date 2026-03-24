@@ -37,7 +37,11 @@ var newCmd = &cobra.Command{
 		}
 
 		elapsed := int(time.Since(start).Seconds())
-		fmt.Printf("\nReady (%ds)\n\n", elapsed)
+		if vm.State == "starting" {
+			fmt.Printf("\nVM '%s' created — pod still starting (%ds). SSH will be ready in a moment.\n\n", vm.Name, elapsed)
+		} else {
+			fmt.Printf("\nReady (%ds)\n\n", elapsed)
+		}
 		fmt.Printf("  Shell:     ib ssh %s\n", vm.Name)
 		fmt.Printf("  HTTPS URL: %s\n\n", vm.IngressURL)
 	},
