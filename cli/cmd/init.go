@@ -12,56 +12,81 @@ import (
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Set up or refresh API key",
+	Short: "Set up CLI with endpoint and API key",
 	Run: func(cmd *cobra.Command, args []string) {
 		reader := bufio.NewReader(os.Stdin)
 
-		if cfg.Endpoint == "" {
-			fmt.Print("Enter InfraBox API endpoint (e.g. https://api.example.com): ")
-			ep, _ := reader.ReadString('\n')
-			ep = strings.TrimSpace(ep)
-			if ep == "" {
-				fmt.Fprintln(os.Stderr, "ERROR: endpoint is required")
-				os.Exit(1)
-			}
-			cfg.Endpoint = ep
+		// Endpoint
+		defaultEP := cfg.Endpoint
+		if defaultEP == "" {
+			defaultEP = defaultEndpoint
+		}
+		if defaultEP != "" {
+			fmt.Printf("Endpoint [%s]: ", defaultEP)
 		} else {
-			fmt.Printf("Endpoint: %s\n", cfg.Endpoint)
+			fmt.Print("Endpoint (e.g. https://api.infrabox.example.com): ")
 		}
-
-		keysURL := strings.TrimRight(cfg.Endpoint, "/") + "/v1/keys"
-
-		fmt.Printf("\nGet your API key:\n\n")
-		fmt.Printf("  1. Open in browser: %s\n", keysURL)
-		fmt.Printf("  2. Sign in with Google (if prompted)\n")
-		fmt.Printf("  3. Copy the \"api_key\" value from the response\n\n")
-		fmt.Print("Paste your API key: ")
-
-		key, _ := reader.ReadString('\n')
-		key = strings.TrimSpace(key)
-
-		// Accept raw key or JSON {"api_key":"..."}
-		if strings.HasPrefix(key, "{") {
-			var resp struct {
-				APIKey string `json:"api_key"`
-			}
-			if err := json.Unmarshal([]byte(key), &resp); err == nil && resp.APIKey != "" {
-				key = resp.APIKey
-			}
+		ep, _ := reader.ReadString('\n')
+		ep = strings.TrimSpace(ep)
+		if ep == "" {
+			ep = defaultEP
 		}
+		if ep == "" {
+			fmt.Fprintln(os.Stderr, "ERROR: endpoint is required")
+			os.Exit(1)
+		}
+		cfg.Endpoint = ep
 
-		if key == "" {
-			fmt.Fprintln(os.Stderr, "ERROR: API key is required")
+		// Name
+		fmt.Print("Name (e.g. your email): ")
+		name, _ := reader.ReadString('\n')
+		name = strings.TrimSpace(name)
+		if name == "" {
+			fmt.Fprintln(os.Stderr, "ERROR: name is required")
 			os.Exit(1)
 		}
 
-		cfg.APIKey = key
+		// Invitation code
+		fmt.Print("Invitation code: ")
+		code, _ := reader.ReadString('\n')
+		code = strings.TrimSpace(code)
+		if code == "" {
+			fmt.Fprintln(os.Stderr, "ERROR: invitation code is required")
+			os.Exit(1)
+		}
+
+		// POST /v1/keys to obtain API key
+		data, status, err := doRequest("POST", "/v1/keys", map[string]string{
+			"name":            name,
+			"invitation_code": code,
+		}, "")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+			os.Exit(1)
+		}
+		if status != 200 {
+			var errResp struct {
+				Error string `json:"error"`
+			}
+			json.Unmarshal(data, &errResp)
+			fmt.Fprintf(os.Stderr, "ERROR: %s\n", errResp.Error)
+			os.Exit(1)
+		}
+
+		var resp struct {
+			APIKey string `json:"api_key"`
+		}
+		if err := json.Unmarshal(data, &resp); err != nil || resp.APIKey == "" {
+			fmt.Fprintln(os.Stderr, "ERROR: unexpected response from server")
+			os.Exit(1)
+		}
+
+		cfg.APIKey = resp.APIKey
 		if err := saveConfig(cfg); err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: failed to save config: %v\n", err)
 			os.Exit(1)
 		}
 
-		fmt.Printf("\nSetup complete\n\n")
-		fmt.Printf("  Run 'ib new <name>' to create a VM\n\n")
+		fmt.Printf("\n✓ Setup complete. Run 'ib new <name>' to create a VM.\n\n")
 	},
 }
