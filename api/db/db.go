@@ -128,10 +128,17 @@ func (d *DB) FindKeyByName(name string) (*Key, error) {
 	return k, err
 }
 
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (d *DB) InsertVM(vm *VM) error {
 	_, err := d.conn.Exec(
 		`INSERT OR REPLACE INTO vms (id, name, owner, namespace, state, auth_enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		vm.ID, vm.Name, vm.Owner, vm.Namespace, vm.State, vm.AuthEnabled, vm.CreatedAt, vm.UpdatedAt,
+		vm.ID, vm.Name, vm.Owner, vm.Namespace, vm.State, boolToInt(vm.AuthEnabled), vm.CreatedAt, vm.UpdatedAt,
 	)
 	return err
 }
@@ -153,10 +160,12 @@ func (d *DB) GetVM(name, owner string) (*VM, error) {
 		args = append(args, owner)
 	}
 	vm := &VM{}
-	err := d.conn.QueryRow(query, args...).Scan(&vm.ID, &vm.Name, &vm.Owner, &vm.Namespace, &vm.State, &vm.AuthEnabled, &vm.CreatedAt, &vm.UpdatedAt)
+	var authEnabled int
+	err := d.conn.QueryRow(query, args...).Scan(&vm.ID, &vm.Name, &vm.Owner, &vm.Namespace, &vm.State, &authEnabled, &vm.CreatedAt, &vm.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	vm.AuthEnabled = authEnabled != 0
 	return vm, err
 }
 
@@ -178,9 +187,11 @@ func (d *DB) ListVMs(owner string) ([]*VM, error) {
 	var vms []*VM
 	for rows.Next() {
 		vm := &VM{}
-		if err := rows.Scan(&vm.ID, &vm.Name, &vm.Owner, &vm.Namespace, &vm.State, &vm.AuthEnabled, &vm.CreatedAt, &vm.UpdatedAt); err != nil {
+		var authEnabled int
+		if err := rows.Scan(&vm.ID, &vm.Name, &vm.Owner, &vm.Namespace, &vm.State, &authEnabled, &vm.CreatedAt, &vm.UpdatedAt); err != nil {
 			return nil, err
 		}
+		vm.AuthEnabled = authEnabled != 0
 		vms = append(vms, vm)
 	}
 	return vms, rows.Err()
@@ -189,7 +200,7 @@ func (d *DB) ListVMs(owner string) ([]*VM, error) {
 // UpdateVMAuth updates the auth_enabled flag for a VM.
 func (d *DB) UpdateVMAuth(name, owner string, enabled bool) error {
 	query := `UPDATE vms SET auth_enabled = ?, updated_at = ? WHERE name = ? AND state != 'deleted'`
-	args := []interface{}{enabled, time.Now(), name}
+	args := []interface{}{boolToInt(enabled), time.Now(), name}
 	if owner != "" {
 		query += ` AND owner = ?`
 		args = append(args, owner)
