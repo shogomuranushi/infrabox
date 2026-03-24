@@ -64,6 +64,10 @@ func main() {
 		r.Post("/v1/vms/{name}/files", h.UploadFile)
 		r.Get("/v1/vms/{name}/files", h.DownloadFile)
 
+		// Resource usage
+		r.Get("/v1/resources", h.GetResources)
+		r.Get("/v1/admin/resources", h.GetAdminResources)
+
 		// Invitation codes (admin only)
 		r.Post("/v1/invitations", h.CreateInvitationCode)
 		r.Get("/v1/invitations", h.ListInvitationCodes)
