@@ -371,6 +371,9 @@ resource "google_compute_instance" "api" {
       --set-json 'webhook.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --set-json 'cainjector.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --set-json 'startupapicheck.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --set 'nodeSelector.infrabox-role=api' \
+      --set 'webhook.nodeSelector.infrabox-role=api' \
+      --set 'cainjector.nodeSelector.infrabox-role=api' \
       --wait --timeout 5m
 
     # =========================================================
