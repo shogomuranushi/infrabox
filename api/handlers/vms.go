@@ -123,11 +123,18 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Wait for Pod to be ready (60s timeout)
+	podReady := true
 	if err := h.k8s.WaitForPodReady(r.Context(), vmNamespace, req.Name, 60); err != nil {
 		log.Printf("WARN: pod not ready for %s: %v", req.Name, err)
+		podReady = false
 	}
 
-	h.db.UpdateVMState(req.Name, "running")
+	state := "running"
+	if !podReady {
+		state = "starting"
+	}
+	h.db.UpdateVMState(req.Name, state)
+	vm.State = state
 
 	jsonOK(w, h.toResponse(vm, ingressHost))
 }

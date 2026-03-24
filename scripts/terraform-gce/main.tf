@@ -371,6 +371,9 @@ resource "google_compute_instance" "api" {
       --set-json 'webhook.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --set-json 'cainjector.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
       --set-json 'startupapicheck.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --set 'nodeSelector.infrabox-role=api' \
+      --set 'webhook.nodeSelector.infrabox-role=api' \
+      --set 'cainjector.nodeSelector.infrabox-role=api' \
       --wait --timeout 5m
 
     # =========================================================
@@ -645,29 +648,32 @@ resource "google_compute_instance_template" "worker" {
       API_IP="${google_compute_instance.api.network_interface[0].network_ip}"
 
       # =========================================================
-      log "1. Install k3s agent"
-      # =========================================================
-      # --with-node-id appends a unique suffix to the hostname so each MIG
-      # recreation gets a distinct node name, avoiding "Node password rejected"
-      # errors caused by stale node-password Secrets on the server.
-      curl -sfL https://get.k3s.io | K3S_URL="https://$API_IP:6443" K3S_TOKEN="$K3S_TOKEN" INSTALL_K3S_EXEC='--with-node-id --node-label=infrabox-role=vm-worker' sh -
-
-      for i in $(seq 1 30); do
-        k3s kubectl get nodes &>/dev/null && break
-        sleep 5
-      done
-
-      # =========================================================
-      log "2. Install Docker (for image building)"
+      log "1. Install Docker (for image building)"
       # =========================================================
       curl -fsSL https://get.docker.com | sh
 
       # =========================================================
-      log "3. Pull base image from GHCR"
+      log "2. Install k3s agent (skip autostart until image is ready)"
+      # =========================================================
+      # INSTALL_K3S_SKIP_START=true installs k3s binaries and containerd but does
+      # NOT start the agent yet, so the node won't join the cluster before the
+      # base image is available (prevents ErrImageNeverPull on pod scheduling).
+      # --with-node-id appends a unique suffix to the hostname so each MIG
+      # recreation gets a distinct node name, avoiding "Node password rejected"
+      # errors caused by stale node-password Secrets on the server.
+      curl -sfL https://get.k3s.io | K3S_URL="https://$API_IP:6443" K3S_TOKEN="$K3S_TOKEN" INSTALL_K3S_EXEC='--with-node-id --node-label=infrabox-role=vm-worker' INSTALL_K3S_SKIP_START=true sh -
+
+      # =========================================================
+      log "3. Pull base image from GHCR and import into k3s containerd"
       # =========================================================
       docker pull ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04
       docker tag ghcr.io/shogomuranushi/infrabox-base:ubuntu-24.04 infrabox-base:ubuntu-24.04
       docker save infrabox-base:ubuntu-24.04 | k3s ctr images import -
+
+      # =========================================================
+      log "4. Start k3s agent (node joins cluster with image already loaded)"
+      # =========================================================
+      systemctl start k3s-agent
 
       log "Worker setup complete!"
     WORKER_STARTUP
