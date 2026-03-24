@@ -59,6 +59,7 @@ func main() {
 		r.Delete("/v1/vms/{name}", h.DeleteVM)
 		r.Patch("/v1/vms/{name}", h.RenameVM)
 		r.Post("/v1/vms/{name}/restart", h.RestartVM)
+		r.Patch("/v1/vms/{name}/auth", h.UpdateVMAuth)
 		r.Get("/v1/vms/{name}/exec", h.ExecVM)
 		r.Post("/v1/vms/{name}/files", h.UploadFile)
 		r.Get("/v1/vms/{name}/files", h.DownloadFile)

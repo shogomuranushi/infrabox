@@ -10,13 +10,14 @@ import (
 )
 
 type VMResponse struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	ExecURL    string `json:"exec_url"`
-	IngressURL string `json:"ingress_url"`
-	CreatedAt  string `json:"created_at"`
-	Error      string `json:"error,omitempty"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	State       string `json:"state"`
+	AuthEnabled bool   `json:"auth_enabled"`
+	ExecURL     string `json:"exec_url"`
+	IngressURL  string `json:"ingress_url"`
+	CreatedAt   string `json:"created_at"`
+	Error       string `json:"error,omitempty"`
 }
 
 type VMListResponse struct {
