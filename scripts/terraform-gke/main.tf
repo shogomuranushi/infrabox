@@ -37,6 +37,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -385,23 +389,37 @@ resource "helm_release" "cert_manager" {
   depends_on = [google_container_node_pool.system]
 }
 
-# ClusterIssuer (Let's Encrypt) — requires cert-manager CRDs
-resource "kubernetes_manifest" "cluster_issuer" {
-  manifest = {
-    apiVersion = "cert-manager.io/v1"
-    kind       = "ClusterIssuer"
-    metadata   = { name = "letsencrypt" }
-    spec = {
-      acme = {
-        server = "https://acme-v02.api.letsencrypt.org/directory"
-        email  = var.letsencrypt_email
-        privateKeySecretRef = { name = "letsencrypt-account-key" }
-        solvers = [{
-          http01 = { ingress = { class = "nginx" } }
-        }]
-      }
-    }
+# ClusterIssuer (Let's Encrypt) — applied via local-exec after cert-manager CRDs are ready
+# kubernetes_manifest is avoided here because it requires cluster connectivity at plan time.
+resource "null_resource" "cluster_issuer" {
+  triggers = {
+    letsencrypt_email    = var.letsencrypt_email
+    cert_manager_version = helm_release.cert_manager.version
   }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      gcloud container clusters get-credentials ${var.cluster_name} \
+        --project=${var.gcp_project} --zone=${var.gcp_zone} --quiet
+      cat <<'YAML' | kubectl apply -f -
+      apiVersion: cert-manager.io/v1
+      kind: ClusterIssuer
+      metadata:
+        name: letsencrypt
+      spec:
+        acme:
+          server: https://acme-v02.api.letsencrypt.org/directory
+          email: ${var.letsencrypt_email}
+          privateKeySecretRef:
+            name: letsencrypt-account-key
+          solvers:
+          - http01:
+              ingress:
+                class: nginx
+      YAML
+    EOT
+  }
+
   depends_on = [helm_release.cert_manager]
 }
 
@@ -574,11 +592,26 @@ resource "kubernetes_deployment" "infrabox_api" {
               }
             }
           }
-          env { name = "INFRABOX_INGRESS_DOMAIN";   value = var.domain }
-          env { name = "INFRABOX_STORAGE_CLASS";    value = "pd-ssd" }
-          env { name = "INFRABOX_VM_NODE_SELECTOR"; value = "infrabox-role=vm-worker" }
-          env { name = "INFRABOX_BASE_IMAGE";        value = "ghcr.io/${var.ghcr_user}/infrabox-base:ubuntu-24.04" }
-          env { name = "INFRABOX_AUTH_URL";          value = local.auth_url }
+          env {
+            name  = "INFRABOX_INGRESS_DOMAIN"
+            value = var.domain
+          }
+          env {
+            name  = "INFRABOX_STORAGE_CLASS"
+            value = "pd-ssd"
+          }
+          env {
+            name  = "INFRABOX_VM_NODE_SELECTOR"
+            value = "infrabox-role=vm-worker"
+          }
+          env {
+            name  = "INFRABOX_BASE_IMAGE"
+            value = "ghcr.io/${var.ghcr_user}/infrabox-base:ubuntu-24.04"
+          }
+          env {
+            name  = "INFRABOX_AUTH_URL"
+            value = local.auth_url
+          }
 
           volume_mount {
             name       = "data"
@@ -656,7 +689,7 @@ resource "kubernetes_ingress_v1" "infrabox_api" {
     }
   }
 
-  depends_on = [kubernetes_manifest.cluster_issuer]
+  depends_on = [null_resource.cluster_issuer]
 }
 
 # -------------------------------------------------------------
@@ -839,7 +872,7 @@ resource "kubernetes_ingress_v1" "oauth2_proxy" {
     }
   }
 
-  depends_on = [kubernetes_manifest.cluster_issuer]
+  depends_on = [null_resource.cluster_issuer]
 }
 
 # -------------------------------------------------------------
