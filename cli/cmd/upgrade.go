@@ -68,6 +68,9 @@ func downloadAndReplace(version, binPath string) error {
 	// write to temp file then atomically replace the existing binary
 	tmp := binPath + ".tmp"
 	if err := os.WriteFile(tmp, newBin, 0755); err != nil {
+		if os.IsPermission(err) {
+			return fmt.Errorf("permission denied — try: sudo ib upgrade")
+		}
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := os.Rename(tmp, binPath); err != nil {
