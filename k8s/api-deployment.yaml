@@ -21,8 +21,8 @@ spec:
           effect: NoSchedule
       containers:
         - name: api
-          image: infrabox-api:latest
-          imagePullPolicy: Never
+          image: ghcr.io/shogomuranushi/infrabox-api:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           env:
