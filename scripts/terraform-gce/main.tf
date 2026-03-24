@@ -3,7 +3,7 @@
 #
 # Architecture:
 #   - API node:    e2-small, on-demand, k3s server + control plane workloads
-#   - Worker node: n2d-standard-4, spot, MIG-managed, k3s agent + VM workloads
+#   - Worker node: e2-standard-4, spot, MIG-managed, k3s agent + VM workloads
 #   - Storage:     GCE PD via CSI driver (persistent across spot preemption)
 #
 # Usage:
@@ -84,7 +84,7 @@ variable "api_machine_type" {
 variable "worker_machine_type" {
   description = "Machine type for worker node (spot)"
   type        = string
-  default     = "n2d-standard-4"
+  default     = "e2-standard-4"
 }
 
 variable "api_disk_size" {
