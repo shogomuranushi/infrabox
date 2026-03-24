@@ -23,6 +23,7 @@ type VMConfig struct {
 	IngressClass string
 	IngressHost  string
 	AuthURL                 string            // e.g. "https://auth.infrabox.example.com" - if set, adds oauth2-proxy auth annotations
+	AuthEnabled             bool              // whether oauth2-proxy auth is active for this VM (default true)
 	Owner                   string            // user who owns this VM
 	NodeSelector            map[string]string // optional: schedule VM pods on specific nodes
 	RcloneDriveClientID     string            // optional: OAuth client ID for rclone Google Drive sync
@@ -357,10 +358,38 @@ func ingressAnnotations(cfg VMConfig) map[string]string {
 	ann := map[string]string{
 		"cert-manager.io/cluster-issuer": "letsencrypt",
 	}
-	if cfg.AuthURL != "" {
+	if cfg.AuthURL != "" && cfg.AuthEnabled {
 		ann["nginx.ingress.kubernetes.io/auth-url"] = cfg.AuthURL + "/oauth2/auth"
 		ann["nginx.ingress.kubernetes.io/auth-signin"] = cfg.AuthURL + "/oauth2/start?rd=https%3A%2F%2F$host$escaped_request_uri"
 		ann["nginx.ingress.kubernetes.io/auth-response-headers"] = "X-Auth-Request-Email,X-Auth-Request-User"
 	}
 	return ann
+}
+
+// UpdateVMAuth patches the VM's Ingress to enable or disable oauth2-proxy auth annotations.
+func (c *Client) UpdateVMAuth(ctx context.Context, namespace, name, authURL string, enabled bool) error {
+	ingressName := "vm-" + name + "-ingress"
+	ingress, err := c.Clientset.NetworkingV1().Ingresses(namespace).Get(ctx, ingressName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get ingress: %w", err)
+	}
+
+	ann := ingress.Annotations
+	if ann == nil {
+		ann = map[string]string{}
+	}
+
+	if enabled && authURL != "" {
+		ann["nginx.ingress.kubernetes.io/auth-url"] = authURL + "/oauth2/auth"
+		ann["nginx.ingress.kubernetes.io/auth-signin"] = authURL + "/oauth2/start?rd=https%3A%2F%2F$host$escaped_request_uri"
+		ann["nginx.ingress.kubernetes.io/auth-response-headers"] = "X-Auth-Request-Email,X-Auth-Request-User"
+	} else {
+		delete(ann, "nginx.ingress.kubernetes.io/auth-url")
+		delete(ann, "nginx.ingress.kubernetes.io/auth-signin")
+		delete(ann, "nginx.ingress.kubernetes.io/auth-response-headers")
+	}
+
+	ingress.Annotations = ann
+	_, err = c.Clientset.NetworkingV1().Ingresses(namespace).Update(ctx, ingress, metav1.UpdateOptions{})
+	return err
 }

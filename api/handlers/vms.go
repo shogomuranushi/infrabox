@@ -29,12 +29,13 @@ func NewHandler(cfg *config.Config, database *db.DB, k8s *k8sclient.Client) *Han
 }
 
 type VMResponse struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	ExecURL    string `json:"exec_url"`
-	IngressURL string `json:"ingress_url"`
-	CreatedAt  string `json:"created_at"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	State       string `json:"state"`
+	AuthEnabled bool   `json:"auth_enabled"`
+	ExecURL     string `json:"exec_url"`
+	IngressURL  string `json:"ingress_url"`
+	CreatedAt   string `json:"created_at"`
 }
 
 type CreateVMRequest struct {
@@ -87,13 +88,14 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vm := &db.VM{
-		ID:        uuid.NewString(),
-		Name:      req.Name,
-		Owner:     user,
-		Namespace: vmNamespace,
-		State:     "creating",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:          uuid.NewString(),
+		Name:        req.Name,
+		Owner:       user,
+		Namespace:   vmNamespace,
+		State:       "creating",
+		AuthEnabled: true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	if err := h.db.InsertVM(vm); err != nil {
 		jsonError(w, "db error", http.StatusInternalServerError)
@@ -109,6 +111,7 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		IngressClass:            h.cfg.IngressClass,
 		IngressHost:             ingressHost,
 		AuthURL:                 h.cfg.AuthURL,
+		AuthEnabled:             true,
 		Owner:                   user,
 		NodeSelector:            h.cfg.VMNodeSelector,
 		RcloneDriveClientID:     h.cfg.RcloneDriveClientID,
@@ -274,13 +277,57 @@ func (h *Handler) ingressHost(name string) string {
 
 func (h *Handler) toResponse(vm *db.VM, ingressHost string) VMResponse {
 	return VMResponse{
-		ID:         vm.ID,
-		Name:       vm.Name,
-		State:      vm.State,
-		ExecURL:    fmt.Sprintf("wss://%s/v1/vms/%s/exec", h.ingressAPIHost(), vm.Name),
-		IngressURL: "https://" + ingressHost,
-		CreatedAt:  vm.CreatedAt.Format(time.RFC3339),
+		ID:          vm.ID,
+		Name:        vm.Name,
+		State:       vm.State,
+		AuthEnabled: vm.AuthEnabled,
+		ExecURL:     fmt.Sprintf("wss://%s/v1/vms/%s/exec", h.ingressAPIHost(), vm.Name),
+		IngressURL:  "https://" + ingressHost,
+		CreatedAt:   vm.CreatedAt.Format(time.RFC3339),
 	}
+}
+
+type UpdateVMAuthRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+func (h *Handler) UpdateVMAuth(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	var req UpdateVMAuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	user := currentUser(r)
+	vm, err := h.db.GetVM(name, user)
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if vm == nil {
+		jsonError(w, "VM not found", http.StatusNotFound)
+		return
+	}
+
+	vmNamespace := vm.Namespace
+	if vmNamespace == "" {
+		vmNamespace = h.cfg.VMNamespace
+	}
+	if err := h.k8s.UpdateVMAuth(r.Context(), vmNamespace, name, h.cfg.AuthURL, req.Enabled); err != nil {
+		log.Printf("ERROR updating auth for VM %s: %v", name, err)
+		jsonError(w, "failed to update VM auth", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.db.UpdateVMAuth(name, user, req.Enabled); err != nil {
+		log.Printf("ERROR updating auth in db for VM %s: %v", name, err)
+		jsonError(w, "failed to update VM auth in db", http.StatusInternalServerError)
+		return
+	}
+
+	vm.AuthEnabled = req.Enabled
+	jsonOK(w, h.toResponse(vm, h.ingressHost(vm.Name)))
 }
 
 func (h *Handler) ingressAPIHost() string {

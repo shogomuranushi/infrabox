@@ -33,10 +33,14 @@ var listCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("%-20s %-10s %s\n", "NAME", "STATE", "URL")
-		fmt.Printf("%-20s %-10s %s\n", "----", "-----", "---")
+		fmt.Printf("%-20s %-10s %-6s %s\n", "NAME", "STATE", "AUTH", "URL")
+		fmt.Printf("%-20s %-10s %-6s %s\n", "----", "-----", "----", "---")
 		for _, vm := range resp.VMs {
-			fmt.Printf("%-20s %-10s %s\n", vm.Name, vm.State, vm.IngressURL)
+			auth := "on"
+			if !vm.AuthEnabled {
+				auth = "off"
+			}
+			fmt.Printf("%-20s %-10s %-6s %s\n", vm.Name, vm.State, auth, vm.IngressURL)
 		}
 	},
 }
