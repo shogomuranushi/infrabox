@@ -113,12 +113,9 @@ This means:
 
 ## Getting Started
 
-### Prerequisites
+### For Users
 
-- An InfraBox server is up and running
-  → See [scripts/](./scripts/) to set up your own
-
-### Install ib CLI
+#### 1. Install ib CLI
 
 ```bash
 curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/install.sh | sudo sh
@@ -126,13 +123,21 @@ curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/i
 
 Or download the binary directly from [Releases](https://github.com/shogomuranushi/infrabox/releases).
 
-### Set up
+#### 2. Set up (requires an invitation code from your admin)
 
 ```bash
-ib init   # Enter your API key
+ib init
 ```
 
-### Create your first VM
+```
+Endpoint [https://api.infrabox.example.com]:
+Name (e.g. your email): you@example.com
+Invitation code: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+✓ Setup complete. Run 'ib new <name>' to create a VM.
+```
+
+#### 3. Create your first VM
 
 ```bash
 ib new my-app
@@ -145,15 +150,53 @@ Ready (7s)
   HTTPS URL: https://my-app.infra.example.com
 ```
 
+#### CLI Reference
+
 ```bash
+ib new my-app              # Create a VM
+ib list                    # List your VMs
 ib ssh my-app              # Open a shell in the VM
 ib scp ./file myvm:/tmp/   # Upload a file to the VM
 ib scp myvm:/tmp/f ./      # Download a file from the VM
-ib list                    # List your VMs
 ib rename old new          # Rename a VM
 ib delete my-app           # Delete a VM
 ib upgrade                 # Upgrade the CLI to the latest version
 ```
+
+---
+
+### For Admins
+
+#### 1. Deploy the server (GCE + Terraform)
+
+```bash
+cd scripts/terraform-gce
+cp terraform.tfvars.example terraform.tfvars  # fill in your values
+terraform init
+terraform apply
+```
+
+Required variables: `gcp_project`, `domain`, `letsencrypt_email`.
+See [scripts/terraform-gce/](./scripts/terraform-gce/) for full options.
+
+#### 2. Save your admin API key
+
+```bash
+ib admin init
+# Admin API key: <key from terraform output admin_api_key>
+```
+
+#### 3. Issue invitation codes for users
+
+```bash
+# Create a single-use invitation code
+ib admin invite create
+
+# List all issued codes
+ib admin invite list
+```
+
+Share the generated code with your user — they enter it during `ib init`.
 
 ---
 

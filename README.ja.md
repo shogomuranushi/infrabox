@@ -113,12 +113,9 @@ ib ssh myvm
 
 ## Getting Started
 
-### 前提条件
+### ユーザー向け
 
-- InfraBox サーバーが起動していること
-  → 自分でセットアップする場合は [scripts/](./scripts/) を参照
-
-### ib CLI のインストール
+#### 1. ib CLI をインストール
 
 ```bash
 curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/install.sh | sudo sh
@@ -126,34 +123,80 @@ curl -fsSL https://github.com/shogomuranushi/infrabox/releases/latest/download/i
 
 バイナリを直接ダウンロードする場合は [Releases](https://github.com/shogomuranushi/infrabox/releases) から。
 
-### セットアップ
+#### 2. セットアップ（管理者から招待コードを受け取ってから実行）
 
 ```bash
-ib init   # API キーを入力
+ib init
 ```
 
-### 最初のVMを作る
+```
+Endpoint [https://api.infrabox.example.com]:
+Name (e.g. your email): you@example.com
+Invitation code: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+✓ Setup complete. Run 'ib new <name>' to create a VM.
+```
+
+#### 3. 最初のVMを作る
 
 ```bash
 ib new my-app
 ```
 
 ```
-完了（7秒）
+Ready (7s)
 
   Shell:     ib ssh my-app
   HTTPS URL: https://my-app.infra.example.com
 ```
 
+#### CLI コマンド一覧
+
 ```bash
+ib new my-app              # VM を作成
+ib list                    # VM 一覧
 ib ssh my-app              # VM でシェルを開く
 ib scp ./file myvm:/tmp/   # ファイルを VM にアップロード
 ib scp myvm:/tmp/f ./      # ファイルを VM からダウンロード
-ib list                    # VM 一覧
 ib rename old new          # VM をリネーム
 ib delete my-app           # VM を削除
 ib upgrade                 # CLI を最新版に更新
 ```
+
+---
+
+### 管理者向け
+
+#### 1. サーバーのデプロイ（GCE + Terraform）
+
+```bash
+cd scripts/terraform-gce
+cp terraform.tfvars.example terraform.tfvars  # 値を設定
+terraform init
+terraform apply
+```
+
+必須変数: `gcp_project`, `domain`, `letsencrypt_email`。
+詳細オプションは [scripts/terraform-gce/](./scripts/terraform-gce/) を参照。
+
+#### 2. 管理者APIキーを保存
+
+```bash
+ib admin init
+# Admin API key: <terraform output admin_api_key の値>
+```
+
+#### 3. ユーザーへの招待コードを発行
+
+```bash
+# 1回限りの招待コードを作成
+ib admin invite create
+
+# 発行済みコード一覧
+ib admin invite list
+```
+
+発行したコードをユーザーに共有し、`ib init` 実行時に入力してもらいます。
 
 ---
 
