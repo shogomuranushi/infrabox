@@ -35,16 +35,17 @@ build_api() {
   log "Building API image on $API_NODE"
   $SSH_CMD "
     set -e
-    cd /tmp
-    if [ -d infrabox-src ]; then
-      cd infrabox-src && git fetch origin $BRANCH && git checkout $BRANCH && git reset --hard origin/$BRANCH
+    if [ -d /tmp/infrabox-src ] && [ ! -w /tmp/infrabox-src ]; then
+      sudo rm -rf /tmp/infrabox-src
+    fi
+    if [ -d /tmp/infrabox-src ]; then
+      git -C /tmp/infrabox-src fetch origin $BRANCH && git -C /tmp/infrabox-src checkout $BRANCH && git -C /tmp/infrabox-src reset --hard origin/$BRANCH
     else
-      git clone --depth 1 -b $BRANCH https://github.com/shogomuranushi/infrabox.git infrabox-src
-      cd infrabox-src
+      git clone --depth 1 -b $BRANCH https://github.com/shogomuranushi/infrabox.git /tmp/infrabox-src
     fi
 
-    docker build -t infrabox-api:latest -f api/Dockerfile api/
-    docker save infrabox-api:latest | sudo k3s ctr images import -
+    sudo docker build -t infrabox-api:latest -f /tmp/infrabox-src/api/Dockerfile /tmp/infrabox-src/api/
+    sudo docker save infrabox-api:latest | sudo k3s ctr images import -
     echo 'API image built and imported'
   "
   ok "API image updated"
@@ -65,16 +66,17 @@ build_base() {
   log "Building base image on $API_NODE"
   $SSH_CMD "
     set -e
-    cd /tmp
-    if [ -d infrabox-src ]; then
-      cd infrabox-src && git fetch origin $BRANCH && git checkout $BRANCH && git reset --hard origin/$BRANCH
+    if [ -d /tmp/infrabox-src ] && [ ! -w /tmp/infrabox-src ]; then
+      sudo rm -rf /tmp/infrabox-src
+    fi
+    if [ -d /tmp/infrabox-src ]; then
+      git -C /tmp/infrabox-src fetch origin $BRANCH && git -C /tmp/infrabox-src checkout $BRANCH && git -C /tmp/infrabox-src reset --hard origin/$BRANCH
     else
-      git clone --depth 1 -b $BRANCH https://github.com/shogomuranushi/infrabox.git infrabox-src
-      cd infrabox-src
+      git clone --depth 1 -b $BRANCH https://github.com/shogomuranushi/infrabox.git /tmp/infrabox-src
     fi
 
-    docker build -t infrabox-base:ubuntu-24.04 -f images/base/Dockerfile images/base/
-    docker save infrabox-base:ubuntu-24.04 | sudo k3s ctr images import -
+    sudo docker build -t infrabox-base:ubuntu-24.04 -f /tmp/infrabox-src/images/base/Dockerfile /tmp/infrabox-src/images/base/
+    sudo docker save infrabox-base:ubuntu-24.04 | sudo k3s ctr images import -
     echo 'Base image built and imported'
   "
   ok "Base image updated on API node"
@@ -95,16 +97,17 @@ build_base() {
     log "Updating base image on $name"
     gcloud compute ssh "$name" --project="$GCP_PROJECT" --zone="$zone" -- "
       set -e
-      cd /tmp
-      if [ -d infrabox-src ]; then
-        cd infrabox-src && git fetch origin $BRANCH && git checkout $BRANCH && git reset --hard origin/$BRANCH
+      if [ -d /tmp/infrabox-src ] && [ ! -w /tmp/infrabox-src ]; then
+        sudo rm -rf /tmp/infrabox-src
+      fi
+      if [ -d /tmp/infrabox-src ]; then
+        git -C /tmp/infrabox-src fetch origin $BRANCH && git -C /tmp/infrabox-src checkout $BRANCH && git -C /tmp/infrabox-src reset --hard origin/$BRANCH
       else
-        git clone --depth 1 -b $BRANCH https://github.com/shogomuranushi/infrabox.git infrabox-src
-        cd infrabox-src
+        git clone --depth 1 -b $BRANCH https://github.com/shogomuranushi/infrabox.git /tmp/infrabox-src
       fi
 
-      docker build -t infrabox-base:ubuntu-24.04 -f images/base/Dockerfile images/base/
-      docker save infrabox-base:ubuntu-24.04 | k3s ctr images import -
+      sudo docker build -t infrabox-base:ubuntu-24.04 -f /tmp/infrabox-src/images/base/Dockerfile /tmp/infrabox-src/images/base/
+      sudo docker save infrabox-base:ubuntu-24.04 | sudo k3s ctr images import -
       echo 'Base image built and imported'
     "
     ok "Base image updated on $name"
