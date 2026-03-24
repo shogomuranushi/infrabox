@@ -551,6 +551,28 @@ resource "google_compute_instance" "api" {
     fi
 
     # =========================================================
+    log "12b. Cron: clean up stale NotReady worker nodes"
+    # =========================================================
+    # When a spot worker is recreated by MIG, the old node entry stays as
+    # NotReady. This cron removes nodes that have been NotReady for >5 min.
+    cat > /usr/local/bin/cleanup-stale-nodes.sh << 'CLEANUP'
+#!/usr/bin/env bash
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+kubectl get nodes --no-headers | grep NotReady | awk '{print $1}' | while read node; do
+  since=$(kubectl get node "$node" -o jsonpath='{.status.conditions[?(@.type=="Ready")].lastTransitionTime}')
+  if [[ -n "$since" ]]; then
+    age=$(( $(date +%s) - $(date -d "$since" +%s 2>/dev/null || echo $(date +%s)) ))
+    if [[ $age -gt 300 ]]; then
+      kubectl delete node "$node" --ignore-not-found
+    fi
+  fi
+done
+CLEANUP
+    chmod +x /usr/local/bin/cleanup-stale-nodes.sh
+    echo "*/5 * * * * root /usr/local/bin/cleanup-stale-nodes.sh >> /var/log/cleanup-stale-nodes.log 2>&1" \
+      > /etc/cron.d/cleanup-stale-nodes
+
+    # =========================================================
     log "Setup complete!"
     # =========================================================
     touch "$MARKER"
@@ -619,14 +641,10 @@ resource "google_compute_instance_template" "worker" {
       # =========================================================
       log "1. Install k3s agent"
       # =========================================================
-      # Delete stale node-password Secret so the server accepts re-registration
-      # after MIG recreates this instance with a fresh disk (new node password).
-      NODE_NAME=$(hostname)
-      curl -sfk -X DELETE \
-        -H "Authorization: Bearer $K3S_TOKEN" \
-        "https://$API_IP:6443/api/v1/namespaces/kube-system/secrets/$${NODE_NAME}.node-password.k3s" || true
-
-      curl -sfL https://get.k3s.io | K3S_URL="https://$API_IP:6443" K3S_TOKEN="$K3S_TOKEN" INSTALL_K3S_EXEC='--node-label=infrabox-role=vm-worker' sh -
+      # --with-node-id appends a unique suffix to the hostname so each MIG
+      # recreation gets a distinct node name, avoiding "Node password rejected"
+      # errors caused by stale node-password Secrets on the server.
+      curl -sfL https://get.k3s.io | K3S_URL="https://$API_IP:6443" K3S_TOKEN="$K3S_TOKEN" INSTALL_K3S_EXEC='--with-node-id --node-label=infrabox-role=vm-worker' sh -
 
       for i in $(seq 1 30); do
         k3s kubectl get nodes &>/dev/null && break
