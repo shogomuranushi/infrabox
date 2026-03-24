@@ -260,6 +260,11 @@ resource "google_compute_instance" "api" {
   tags         = ["${var.instance_name}-api"]
 
   lifecycle {
+    # Ignore startup script changes to prevent accidental instance replacement.
+    # The startup script only runs once on initial boot; changes are applied by
+    # recreating the instance manually when a full cluster rebuild is intended.
+    ignore_changes = [metadata_startup_script]
+
     precondition {
       condition     = var.oauth_client_id == "" || (var.oauth_client_secret != "" && var.oauth_email_domain != "")
       error_message = "oauth_client_secret and oauth_email_domain are required when oauth_client_id is set."
