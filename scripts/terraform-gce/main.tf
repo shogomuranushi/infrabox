@@ -383,6 +383,7 @@ resource "google_compute_instance" "api" {
       --set controller.service.type=ClusterIP \
       --set controller.admissionWebhooks.enabled=false \
       --set-json 'controller.tolerations=[{"key":"infrabox-role","operator":"Equal","value":"api","effect":"NoSchedule"}]' \
+      --set-json 'controller.nodeSelector={"infrabox-role":"api"}' \
       --wait --timeout 5m
 
     # =========================================================
@@ -437,6 +438,11 @@ resource "google_compute_instance" "api" {
                   effect: NoSchedule
   KUST
     kubectl apply -k /tmp/gcp-csi-overlay/
+    # Remove GOOGLE_APPLICATION_CREDENTIALS from gce-pd-driver so it uses
+    # Application Default Credentials (GCE metadata server) instead of the
+    # empty cloud-sa.json placeholder, which causes a startup crash.
+    kubectl set env deployment/csi-gce-pd-controller -n gce-pd-csi-driver \
+      -c gce-pd-driver GOOGLE_APPLICATION_CREDENTIALS-
 
     # Wait for CSI driver to be ready
     for i in $(seq 1 30); do
