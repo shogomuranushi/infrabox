@@ -3,7 +3,7 @@
 #
 # Architecture:
 #   - API node:    e2-small, on-demand, k3s server + control plane workloads
-#   - Worker node: n2d-standard-4, spot, MIG-managed, k3s agent + VM workloads
+#   - Worker node: e2-standard-4, spot, MIG-managed, k3s agent + VM workloads
 #   - Storage:     GCE PD via CSI driver (persistent across spot preemption)
 #
 # Usage:
@@ -84,7 +84,7 @@ variable "api_machine_type" {
 variable "worker_machine_type" {
   description = "Machine type for worker node (spot)"
   type        = string
-  default     = "n2d-standard-4"
+  default     = "e2-standard-4"
 }
 
 variable "api_disk_size" {
@@ -619,6 +619,13 @@ resource "google_compute_instance_template" "worker" {
       # =========================================================
       log "1. Install k3s agent"
       # =========================================================
+      # Delete stale node-password Secret so the server accepts re-registration
+      # after MIG recreates this instance with a fresh disk (new node password).
+      NODE_NAME=$(hostname)
+      curl -sfk -X DELETE \
+        -H "Authorization: Bearer $K3S_TOKEN" \
+        "https://$API_IP:6443/api/v1/namespaces/kube-system/secrets/$${NODE_NAME}.node-password.k3s" || true
+
       curl -sfL https://get.k3s.io | K3S_URL="https://$API_IP:6443" K3S_TOKEN="$K3S_TOKEN" INSTALL_K3S_EXEC='--node-label=infrabox-role=vm-worker' sh -
 
       for i in $(seq 1 30); do
