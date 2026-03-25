@@ -11,10 +11,11 @@ import (
 // NodeResources holds resource capacity and allocation for a single node.
 type NodeResources struct {
 	Name              string
-	CPUAllocatable    int64 // millicores
-	MemoryAllocatable int64 // bytes
-	CPURequests       int64 // millicores (sum of pod requests scheduled on this node)
-	MemoryRequests    int64 // bytes
+	Role              string // infrabox-role label value (e.g. "api", "vm-worker")
+	CPUAllocatable    int64  // millicores
+	MemoryAllocatable int64  // bytes
+	CPURequests       int64  // millicores (sum of pod requests scheduled on this node)
+	MemoryRequests    int64  // bytes
 }
 
 // NamespaceResources holds resource usage for a single user namespace.
@@ -94,6 +95,7 @@ func (c *Client) GetClusterResources(ctx context.Context, baseNamespace string) 
 	for _, node := range nodes.Items {
 		nr := &NodeResources{
 			Name:              node.Name,
+			Role:              node.Labels["infrabox-role"],
 			CPUAllocatable:    node.Status.Allocatable.Cpu().MilliValue(),
 			MemoryAllocatable: node.Status.Allocatable.Memory().Value(),
 		}

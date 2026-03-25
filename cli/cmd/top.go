@@ -67,6 +67,14 @@ func renderUserTop(r UserResourcesResp) {
 // --- Shared bar chart utilities ---
 
 func renderBar(used, total int64, width int) string {
+	return renderBarWith(used, total, width, "█")
+}
+
+func renderBarDim(used, total int64, width int) string {
+	return renderBarWith(used, total, width, "▓")
+}
+
+func renderBarWith(used, total int64, width int, fill string) string {
 	if total == 0 {
 		return "[" + strings.Repeat("░", width) + "]   -%"
 	}
@@ -80,7 +88,7 @@ func renderBar(used, total int64, width int) string {
 	}
 	empty := width - filled
 	return fmt.Sprintf("[%s%s] %3d%%",
-		strings.Repeat("█", filled),
+		strings.Repeat(fill, filled),
 		strings.Repeat("░", empty),
 		int(pct*100))
 }
