@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var newCmd = &cobra.Command{
-	Use:   "new <name>",
+var createCmd = &cobra.Command{
+	Use:   "create <name>",
 	Short: "Create a new VM",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
