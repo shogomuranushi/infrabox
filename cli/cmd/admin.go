@@ -54,9 +54,7 @@ var adminInviteCreateCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		if status != 200 {
-			var errResp struct{ Error string `json:"error"` }
-			json.Unmarshal(data, &errResp)
-			fmt.Fprintf(os.Stderr, "ERROR: %s\n", errResp.Error)
+			fmt.Fprintf(os.Stderr, "ERROR: %s\n", extractError(data, status))
 			os.Exit(1)
 		}
 		var resp struct {
@@ -78,9 +76,7 @@ var adminInviteListCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		if status != 200 {
-			var errResp struct{ Error string `json:"error"` }
-			json.Unmarshal(data, &errResp)
-			fmt.Fprintf(os.Stderr, "ERROR: %s\n", errResp.Error)
+			fmt.Fprintf(os.Stderr, "ERROR: %s\n", extractError(data, status))
 			os.Exit(1)
 		}
 		var resp struct {

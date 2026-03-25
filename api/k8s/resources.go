@@ -137,10 +137,14 @@ func (c *Client) GetClusterResources(ctx context.Context, baseNamespace string) 
 	}
 
 	for _, ns := range namespaces.Items {
-		if !strings.HasPrefix(ns.Name, baseNamespace+"-") {
+		var owner string
+		if ns.Name == baseNamespace {
+			owner = "(admin)"
+		} else if strings.HasPrefix(ns.Name, baseNamespace+"-") {
+			owner = strings.TrimPrefix(ns.Name, baseNamespace+"-")
+		} else {
 			continue
 		}
-		owner := strings.TrimPrefix(ns.Name, baseNamespace+"-")
 		nsRes, err := c.GetUserResources(ctx, ns.Name)
 		if err != nil {
 			continue
