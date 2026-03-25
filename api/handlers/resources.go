@@ -23,6 +23,7 @@ type UserResourcesResponse struct {
 
 type NodeResourceResponse struct {
 	Name   string             `json:"name"`
+	Role   string             `json:"role"`
 	CPU    NodeResourceDetail `json:"cpu"`
 	Memory NodeResourceDetail `json:"memory"`
 }
@@ -102,6 +103,7 @@ func (h *Handler) GetAdminResources(w http.ResponseWriter, r *http.Request) {
 	for _, n := range res.Nodes {
 		resp.Nodes = append(resp.Nodes, NodeResourceResponse{
 			Name:   n.Name,
+			Role:   n.Role,
 			CPU:    NodeResourceDetail{Allocatable: n.CPUAllocatable, Requests: n.CPURequests},
 			Memory: NodeResourceDetail{Allocatable: n.MemoryAllocatable, Requests: n.MemoryRequests},
 		})

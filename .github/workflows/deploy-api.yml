@@ -1,4 +1,4 @@
-name: Build and push API image
+name: Build, push, and deploy API
 
 on:
   push:
@@ -11,6 +11,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/infrabox-api
+  CLUSTER_NAME: infrabox
+  CLUSTER_ZONE: asia-northeast1-b
+  DEPLOY_NAMESPACE: infrabox
 
 jobs:
   build-and-push:
@@ -18,6 +21,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -39,3 +43,19 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          location: ${{ env.CLUSTER_ZONE }}
+          project_id: ${{ secrets.GCP_PROJECT }}
+
+      - name: Rollout restart
+        run: kubectl rollout restart deployment/infrabox-api -n ${{ env.DEPLOY_NAMESPACE }}
+
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/infrabox-api -n ${{ env.DEPLOY_NAMESPACE }} --timeout=120s
