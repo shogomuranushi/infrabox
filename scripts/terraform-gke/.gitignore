@@ -1,0 +1,9 @@
+# Terraform state (contains actual resource IDs, IPs, secrets)
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Local variable overrides (may contain secrets)
+*.tfvars
+!*.tfvars.example

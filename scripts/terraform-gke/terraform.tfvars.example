@@ -1,0 +1,18 @@
+gcp_project       = "your-gcp-project"
+gcp_zone          = "asia-northeast1-b"
+domain            = "infrabox.example.com"
+letsencrypt_email = "you@example.com"
+
+# Optional: Google OAuth2 (enables oauth2-proxy for VM auth)
+# oauth_client_id     = "xxx.apps.googleusercontent.com"
+# oauth_client_secret = "GOCSPX-xxx"
+# oauth_email_domain  = "example.com"
+
+# Optional overrides
+# cluster_name         = "infrabox"
+# system_machine_type  = "e2-standard-2"
+# worker_machine_type  = "e2-standard-4"
+# worker_min           = 1
+# worker_max           = 10
+# admin_api_key        = "your-secret-key"   # auto-generated if omitted
+# ghcr_user            = "shogomuranushi"
