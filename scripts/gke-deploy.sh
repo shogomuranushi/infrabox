@@ -29,7 +29,7 @@ err() { echo "✗ $*" >&2; exit 1; }
 
 deploy_api() {
   log "Building and pushing API image"
-  docker build -t "ghcr.io/${GHCR_USER}/infrabox-api:latest" \
+  docker build --platform linux/amd64 -t "ghcr.io/${GHCR_USER}/infrabox-api:latest" \
     -f "$REPO_ROOT/api/Dockerfile" "$REPO_ROOT/api/"
   docker push "ghcr.io/${GHCR_USER}/infrabox-api:latest"
   ok "API image pushed"

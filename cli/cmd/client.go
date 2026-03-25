@@ -62,6 +62,23 @@ func doRequest(method, path string, body interface{}, apiKey string) ([]byte, in
 	return data, resp.StatusCode, nil
 }
 
+// extractError returns a human-readable error message from an API error response.
+// Falls back to "HTTP <status>" when the body is not parseable JSON.
+func extractError(data []byte, status int) string {
+	var errResp struct{ Error string `json:"error"` }
+	if err := json.Unmarshal(data, &errResp); err == nil && errResp.Error != "" {
+		return errResp.Error
+	}
+	if len(data) > 0 {
+		msg := string(data)
+		if len(msg) > 120 {
+			msg = msg[:120] + "..."
+		}
+		return fmt.Sprintf("HTTP %d: %s", status, msg)
+	}
+	return fmt.Sprintf("HTTP %d", status)
+}
+
 func mustConfig() {
 	if cfg.APIKey == "" {
 		fmt.Fprintln(os.Stderr, "ERROR: API key is not set. Run 'ib init' or set INFRABOX_API_KEY.")

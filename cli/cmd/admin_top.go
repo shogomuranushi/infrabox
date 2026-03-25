@@ -54,9 +54,7 @@ var adminTopCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		if status != 200 {
-			var errResp struct{ Error string `json:"error"` }
-			json.Unmarshal(data, &errResp)
-			fmt.Fprintf(os.Stderr, "ERROR: %s\n", errResp.Error)
+			fmt.Fprintf(os.Stderr, "ERROR: %s\n", extractError(data, status))
 			os.Exit(1)
 		}
 		var resp AdminResourcesResp
@@ -70,9 +68,9 @@ var adminTopCmd = &cobra.Command{
 
 func renderAdminTop(r AdminResourcesResp) {
 	fmt.Println()
-	fmt.Println("╔══════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                     InfraBox Cluster Status                     ║")
-	fmt.Println("╠══════════════════════════════════════════════════════════════════╣")
+	fmt.Println("╔═══════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║                     InfraBox Cluster Status                      ║")
+	fmt.Println("╠═══════════════════════════════════════════════════════════════════╣")
 	fmt.Println()
 
 	// --- Nodes ---
@@ -152,7 +150,7 @@ func renderAdminTop(r AdminResourcesResp) {
 
 	fmt.Println("  " + strings.Repeat("─", 62))
 	fmt.Println()
-	fmt.Println("╚══════════════════════════════════════════════════════════════════╝")
+	fmt.Println("╚═══════════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 }
 

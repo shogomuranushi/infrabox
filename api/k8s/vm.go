@@ -360,7 +360,7 @@ func ingressAnnotations(cfg VMConfig) map[string]string {
 	}
 	if cfg.AuthURL != "" && cfg.AuthEnabled {
 		ann["nginx.ingress.kubernetes.io/auth-url"] = cfg.AuthURL + "/oauth2/auth"
-		ann["nginx.ingress.kubernetes.io/auth-signin"] = cfg.AuthURL + "/oauth2/start?rd=https%3A%2F%2F$host$escaped_request_uri"
+		ann["nginx.ingress.kubernetes.io/auth-signin"] = cfg.AuthURL + "/oauth2/start?rd=https://$host$escaped_request_uri"
 		ann["nginx.ingress.kubernetes.io/auth-response-headers"] = "X-Auth-Request-Email,X-Auth-Request-User"
 	}
 	return ann
@@ -381,7 +381,7 @@ func (c *Client) UpdateVMAuth(ctx context.Context, namespace, name, authURL stri
 
 	if enabled && authURL != "" {
 		ann["nginx.ingress.kubernetes.io/auth-url"] = authURL + "/oauth2/auth"
-		ann["nginx.ingress.kubernetes.io/auth-signin"] = authURL + "/oauth2/start?rd=https%3A%2F%2F$host$escaped_request_uri"
+		ann["nginx.ingress.kubernetes.io/auth-signin"] = authURL + "/oauth2/start?rd=https://$host$escaped_request_uri"
 		ann["nginx.ingress.kubernetes.io/auth-response-headers"] = "X-Auth-Request-Email,X-Auth-Request-User"
 	} else {
 		delete(ann, "nginx.ingress.kubernetes.io/auth-url")
