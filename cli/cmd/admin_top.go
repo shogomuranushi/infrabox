@@ -9,6 +9,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ANSI color codes
+const (
+	colorReset  = "\033[0m"
+	colorDim    = "\033[2m"
+	colorCyan   = "\033[36m"
+	colorYellow = "\033[33m"
+)
+
 type AdminResourcesResp struct {
 	Nodes      []NodeResourceResp      `json:"nodes"`
 	Namespaces []NamespaceResourceResp `json:"namespaces"`
@@ -17,6 +25,7 @@ type AdminResourcesResp struct {
 
 type NodeResourceResp struct {
 	Name   string           `json:"name"`
+	Role   string           `json:"role"`
 	CPU    NodeResourceItem `json:"cpu"`
 	Memory NodeResourceItem `json:"memory"`
 }
@@ -67,19 +76,37 @@ var adminTopCmd = &cobra.Command{
 }
 
 func renderAdminTop(r AdminResourcesResp) {
+	// Split nodes by role
+	var vmNodes, sysNodes []NodeResourceResp
+	for _, n := range r.Nodes {
+		if n.Role == "vm-worker" {
+			vmNodes = append(vmNodes, n)
+		} else {
+			sysNodes = append(sysNodes, n)
+		}
+	}
+
+	// Totals for vm-worker nodes only
+	var vmCPUAlloc, vmCPUReq, vmMemAlloc, vmMemReq int64
+	for _, n := range vmNodes {
+		vmCPUAlloc += n.CPU.Allocatable
+		vmCPUReq += n.CPU.Requests
+		vmMemAlloc += n.Memory.Allocatable
+		vmMemReq += n.Memory.Requests
+	}
+
 	fmt.Println()
 	fmt.Println("╔═══════════════════════════════════════════════════════════════════╗")
 	fmt.Println("║                     InfraBox Cluster Status                      ║")
 	fmt.Println("╠═══════════════════════════════════════════════════════════════════╣")
 	fmt.Println()
 
-	// --- Nodes ---
-	fmt.Printf("  Nodes (%d)\n", r.Totals.Nodes)
+	// --- VM Worker Nodes ---
+	fmt.Printf("  %sVM Worker Nodes (%d)%s\n", colorCyan, len(vmNodes), colorReset)
 	fmt.Println("  " + strings.Repeat("─", 62))
 
-	// Find max node name length for alignment
 	maxName := 8
-	for _, n := range r.Nodes {
+	for _, n := range vmNodes {
 		if len(n.Name) > maxName {
 			maxName = len(n.Name)
 		}
@@ -89,7 +116,7 @@ func renderAdminTop(r AdminResourcesResp) {
 	}
 
 	barW := 20
-	for _, n := range r.Nodes {
+	for _, n := range vmNodes {
 		name := n.Name
 		if len(name) > maxName {
 			name = name[:maxName]
@@ -103,20 +130,41 @@ func renderAdminTop(r AdminResourcesResp) {
 	fmt.Println("  " + strings.Repeat("─", 62))
 	fmt.Printf("  %-*s  CPU %s  MEM %s\n",
 		maxName, "Total",
-		renderBar(r.Totals.UsedCPU, r.Totals.TotalCPU, barW),
-		renderBar(r.Totals.UsedMemory, r.Totals.TotalMemory, barW))
+		renderBar(vmCPUReq, vmCPUAlloc, barW),
+		renderBar(vmMemReq, vmMemAlloc, barW))
 	fmt.Printf("  %*s      %s / %s              %s / %s\n",
 		maxName, "",
-		formatCPU(r.Totals.UsedCPU), formatCPU(r.Totals.TotalCPU),
-		formatMemory(r.Totals.UsedMemory), formatMemory(r.Totals.TotalMemory))
+		formatCPU(vmCPUReq), formatCPU(vmCPUAlloc),
+		formatMemory(vmMemReq), formatMemory(vmMemAlloc))
 	fmt.Println()
 
+	// --- System Nodes (summary only) ---
+	if len(sysNodes) > 0 {
+		var sCPUAlloc, sCPUReq, sMemAlloc, sMemReq int64
+		for _, n := range sysNodes {
+			sCPUAlloc += n.CPU.Allocatable
+			sCPUReq += n.CPU.Requests
+			sMemAlloc += n.Memory.Allocatable
+			sMemReq += n.Memory.Requests
+		}
+		fmt.Printf("  %sSystem Nodes (%d)  CPU %s  MEM %s%s\n",
+			colorDim, len(sysNodes),
+			renderBar(sCPUReq, sCPUAlloc, barW),
+			renderBar(sMemReq, sMemAlloc, barW),
+			colorReset)
+		fmt.Println()
+	}
+
 	// --- Users ---
-	totalUsers := len(r.Namespaces)
-	fmt.Printf("  Users (%d active, %d VMs)\n", totalUsers, r.Totals.TotalVMs)
+	userCount := 0
+	for _, ns := range r.Namespaces {
+		if ns.Owner != "(admin)" {
+			userCount++
+		}
+	}
+	fmt.Printf("  Users (%d active, %d VMs)\n", userCount, r.Totals.TotalVMs)
 	fmt.Println("  " + strings.Repeat("─", 62))
 
-	// Find max owner name length
 	maxOwner := 4
 	for _, ns := range r.Namespaces {
 		if len(ns.Owner) > maxOwner {
@@ -134,18 +182,26 @@ func renderAdminTop(r AdminResourcesResp) {
 			owner = owner[:maxOwner]
 		}
 
-		// Use CPU quota for the bar if available, otherwise skip bar
 		quotaBar := ""
 		if ns.CPU.Quota > 0 {
 			quotaBar = renderBar(ns.CPU.Used, ns.CPU.Quota, 20)
 		}
 
-		fmt.Printf("  %-*s  %3d  %8s  %8s  %s\n",
-			maxOwner, owner,
-			ns.VMCount,
-			formatCPU(ns.CPU.Used),
-			formatMemory(ns.Memory.Used),
-			quotaBar)
+		if ns.Owner == "(admin)" {
+			fmt.Printf("  %s%-*s  %3d  %8s  %8s  %s%s\n",
+				colorDim, maxOwner, owner,
+				ns.VMCount,
+				formatCPU(ns.CPU.Used),
+				formatMemory(ns.Memory.Used),
+				quotaBar, colorReset)
+		} else {
+			fmt.Printf("  %-*s  %3d  %8s  %8s  %s\n",
+				maxOwner, owner,
+				ns.VMCount,
+				formatCPU(ns.CPU.Used),
+				formatMemory(ns.Memory.Used),
+				quotaBar)
+		}
 	}
 
 	fmt.Println("  " + strings.Repeat("─", 62))
