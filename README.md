@@ -17,7 +17,7 @@ Inspired by [exe.dev](https://exe.dev) — with deep respect for their work.
 InfraBox gives every engineer their own Linux machine in seconds.
 
 ```bash
-$ ib new my-app
+$ ib create my-app
 Ready (7s)
 
   Shell: ib ssh my-app
@@ -49,6 +49,8 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 | 🛡️ | Per-user namespace isolation & ResourceQuota |
 | 💾 | Persistent disk (GCE PD / PVC) |
 | 📁 | Google Drive context sharing via rclone |
+| 🔑 | Per-VM oauth2 auth toggle (enable / disable per endpoint) |
+| 📊 | Resource usage visualization (`ib top` / `ib admin top`) |
 | 📦 | `ib` CLI tool |
 
 ---
@@ -64,7 +66,7 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
                        │ HTTPS:443
                        ▼
 ┌────────────────────────────────────────────────────────┐
-│              Kubernetes Cluster (k3s)                  │
+│         Kubernetes Cluster (k3s or GKE Standard)       │
 │                                                        │
 │  API Node (on-demand)                                  │
 │  ┌──────────────────────────────────────────────────┐  │
@@ -134,13 +136,13 @@ Endpoint [https://api.infrabox.example.com]:
 Name (e.g. your email): you@example.com
 Invitation code: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
-✓ Setup complete. Run 'ib new <name>' to create a VM.
+✓ Setup complete. Run 'ib create <name>' to create a VM.
 ```
 
 #### 3. Create your first VM
 
 ```bash
-ib new my-app
+ib create my-app
 ```
 
 ```
@@ -153,13 +155,16 @@ Ready (7s)
 #### CLI Reference
 
 ```bash
-ib new my-app              # Create a VM
+ib create my-app           # Create a VM
 ib list                    # List your VMs
 ib ssh my-app              # Open a shell in the VM
 ib scp ./file myvm:/tmp/   # Upload a file to the VM
 ib scp myvm:/tmp/f ./      # Download a file from the VM
 ib rename old new          # Rename a VM
 ib delete my-app           # Delete a VM
+ib auth enable my-app      # Enable oauth2 auth on the VM's HTTPS endpoint
+ib auth disable my-app     # Disable auth (fully open)
+ib top                     # Show your resource usage (CPU / memory / VMs)
 ib upgrade                 # Upgrade the CLI to the latest version
 ```
 
@@ -167,7 +172,9 @@ ib upgrade                 # Upgrade the CLI to the latest version
 
 ### For Admins
 
-#### 1. Deploy the server (GCE + Terraform)
+#### 1. Deploy the server
+
+**Option A — GCE + k3s (Terraform)**
 
 ```bash
 cd scripts/terraform-gce
@@ -178,6 +185,18 @@ terraform apply
 
 Required variables: `gcp_project`, `domain`, `letsencrypt_email`.
 See [scripts/terraform-gce/](./scripts/terraform-gce/) for full options.
+
+**Option B — GKE Standard (Terraform)**
+
+```bash
+cd scripts/terraform-gke
+cp terraform.tfvars.example terraform.tfvars  # fill in your values
+terraform init
+terraform apply
+```
+
+Required variables: `project_id`, `domain`, `letsencrypt_email`.
+See [scripts/terraform-gke/](./scripts/terraform-gke/) for full options.
 
 #### 2. Save your admin API key
 
@@ -198,6 +217,24 @@ ib admin invite list
 
 Share the generated code with your user — they enter it during `ib init`.
 
+#### 4. Monitor cluster resource usage
+
+```bash
+ib admin top
+```
+
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║                     InfraBox Cluster Status                      ║
+╠═══════════════════════════════════════════════════════════════════╣
+
+  VM Worker Nodes (2)
+  ──────────────────────────────────────────────────────────────
+  gke-worker-0  CPU [████████░░░░░░░░░░░░]  45%  MEM [██████░░░░░░░░░░░░░░]  31%
+  gke-worker-1  CPU [███░░░░░░░░░░░░░░░░░░]  17%  MEM [████░░░░░░░░░░░░░░░░]  21%
+  ...
+```
+
 ---
 
 ## API Endpoints
@@ -211,9 +248,12 @@ Share the generated code with your user — they enter it during `ib init`.
 | `DELETE` | `/v1/vms/{name}` | Delete a VM |
 | `PATCH` | `/v1/vms/{name}` | Rename a VM |
 | `POST` | `/v1/vms/{name}/restart` | Restart a VM |
+| `PATCH` | `/v1/vms/{name}/auth` | Toggle oauth2 auth on/off |
 | `GET` | `/v1/vms/{name}/exec` | WebSocket shell session |
 | `POST` | `/v1/vms/{name}/files?path=` | Upload files (tar stream) |
 | `GET` | `/v1/vms/{name}/files?path=` | Download files (tar stream) |
+| `GET` | `/v1/resources` | Get your resource usage |
+| `GET` | `/v1/admin/resources` | Get cluster-wide resource usage (admin only) |
 
 All endpoints except `/healthz` and `/v1/keys` require `X-API-Key` header.
 
@@ -225,8 +265,8 @@ All endpoints except `/healthz` and `/v1/keys` require `X-API-Key` header.
 |---|---|---|
 | Local (macOS + Docker) | Working | [scripts/local-setup.sh](./scripts/local-setup.sh) |
 | GCE / VPS (k3s) | Working | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
-| GCE (Terraform) | Working | [scripts/terraform-gce/](./scripts/terraform-gce/) |
-| GKE / EKS / other managed K8s | Coming soon | — |
+| GCE (Terraform + k3s) | Working | [scripts/terraform-gce/](./scripts/terraform-gce/) |
+| GKE Standard (Terraform) | Working | [scripts/terraform-gke/](./scripts/terraform-gke/) |
 
 ---
 
