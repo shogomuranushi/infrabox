@@ -25,6 +25,7 @@ type NodeResourceResp struct {
 type NodeResourceItem struct {
 	Allocatable int64 `json:"allocatable"`
 	Requests    int64 `json:"requests"`
+	VMRequests  int64 `json:"vm_requests"`
 }
 
 type NamespaceResourceResp struct {
@@ -78,13 +79,11 @@ func renderAdminTop(r AdminResourcesResp) {
 		}
 	}
 
-	// Totals for vm-worker nodes only
-	var vmCPUAlloc, vmCPUReq, vmMemAlloc, vmMemReq int64
+	// VM requests only (managed-by=infrabox pods)
+	var vmCPUReq, vmMemReq int64
 	for _, n := range vmNodes {
-		vmCPUAlloc += n.CPU.Allocatable
-		vmCPUReq += n.CPU.Requests
-		vmMemAlloc += n.Memory.Allocatable
-		vmMemReq += n.Memory.Requests
+		vmCPUReq += n.CPU.VMRequests
+		vmMemReq += n.Memory.VMRequests
 	}
 
 	fmt.Println()
@@ -113,21 +112,30 @@ func renderAdminTop(r AdminResourcesResp) {
 		if len(name) > maxName {
 			name = name[:maxName]
 		}
+		cpuCap := n.CPU.Allocatable - (n.CPU.Requests - n.CPU.VMRequests)
+		memCap := n.Memory.Allocatable - (n.Memory.Requests - n.Memory.VMRequests)
 		fmt.Printf("  %-*s  CPU %s  MEM %s\n",
 			maxName, name,
-			renderBar(n.CPU.Requests, n.CPU.Allocatable, barW),
-			renderBar(n.Memory.Requests, n.Memory.Allocatable, barW))
+			renderBar(n.CPU.VMRequests, cpuCap, barW),
+			renderBar(n.Memory.VMRequests, memCap, barW))
+	}
+
+	// Totals: vm requests vs vm-available capacity
+	var vmCPUCap, vmMemCap int64
+	for _, n := range vmNodes {
+		vmCPUCap += n.CPU.Allocatable - (n.CPU.Requests - n.CPU.VMRequests)
+		vmMemCap += n.Memory.Allocatable - (n.Memory.Requests - n.Memory.VMRequests)
 	}
 
 	fmt.Println("  " + strings.Repeat("─", 62))
 	fmt.Printf("  %-*s  CPU %s  MEM %s\n",
 		maxName, "Total",
-		renderBar(vmCPUReq, vmCPUAlloc, barW),
-		renderBar(vmMemReq, vmMemAlloc, barW))
+		renderBar(vmCPUReq, vmCPUCap, barW),
+		renderBar(vmMemReq, vmMemCap, barW))
 	fmt.Printf("  %*s      %s / %s              %s / %s\n",
 		maxName, "",
-		formatCPU(vmCPUReq), formatCPU(vmCPUAlloc),
-		formatMemory(vmMemReq), formatMemory(vmMemAlloc))
+		formatCPU(vmCPUReq), formatCPU(vmCPUCap),
+		formatMemory(vmMemReq), formatMemory(vmMemCap))
 	fmt.Println()
 
 	// --- System Nodes (dim summary) ---

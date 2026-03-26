@@ -10,12 +10,14 @@ import (
 
 // NodeResources holds resource capacity and allocation for a single node.
 type NodeResources struct {
-	Name              string
-	Role              string // infrabox-role label value (e.g. "api", "vm-worker")
-	CPUAllocatable    int64  // millicores
-	MemoryAllocatable int64  // bytes
-	CPURequests       int64  // millicores (sum of pod requests scheduled on this node)
-	MemoryRequests    int64  // bytes
+	Name                string
+	Role                string // infrabox-role label value (e.g. "api", "vm-worker")
+	CPUAllocatable      int64  // millicores
+	MemoryAllocatable   int64  // bytes
+	CPURequests         int64  // millicores (all pods)
+	MemoryRequests      int64  // bytes (all pods)
+	VMCPURequests       int64  // millicores (managed-by=infrabox pods only)
+	VMMemoryRequests    int64  // bytes (managed-by=infrabox pods only)
 }
 
 // NamespaceResources holds resource usage for a single user namespace.
@@ -116,12 +118,21 @@ func (c *Client) GetClusterResources(ctx context.Context, baseNamespace string) 
 		if !ok {
 			continue
 		}
+		isVM := pod.Labels["managed-by"] == "infrabox"
 		for _, c := range pod.Spec.Containers {
+			cpuVal := int64(0)
+			memVal := int64(0)
 			if cpu := c.Resources.Requests.Cpu(); cpu != nil {
-				nr.CPURequests += cpu.MilliValue()
+				cpuVal = cpu.MilliValue()
 			}
 			if mem := c.Resources.Requests.Memory(); mem != nil {
-				nr.MemoryRequests += mem.Value()
+				memVal = mem.Value()
+			}
+			nr.CPURequests += cpuVal
+			nr.MemoryRequests += memVal
+			if isVM {
+				nr.VMCPURequests += cpuVal
+				nr.VMMemoryRequests += memVal
 			}
 		}
 	}
