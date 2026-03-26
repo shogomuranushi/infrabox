@@ -4,15 +4,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 // SyncEntry represents a single file/directory to transfer on VM creation.
+// Dst can be either a directory path (e.g. "/home/ubuntu/.claude/") or a
+// full file path (e.g. "/home/ubuntu/.claude.json"). When Dst does not end
+// with "/" and Src is a file, the parent directory of Dst is used as the
+// extraction target so the file lands at the expected path.
 type SyncEntry struct {
 	Src string `yaml:"src"` // local path (~ expanded at runtime)
-	Dst string `yaml:"dst"` // destination directory on the VM
+	Dst string `yaml:"dst"` // destination path on the VM (file or directory)
 }
 
 // SyncConfig holds the list of sync entries persisted in ~/.ib/sync.yaml.
@@ -76,7 +81,13 @@ func applySync(vmName string) {
 			fmt.Fprintf(os.Stderr, "  WARNING: skipping %s: %v\n", entry.Src, err)
 			continue
 		}
-		if err := uploadToVM(vmName, entry.Dst, src, info.IsDir()); err != nil {
+		// If dst is a file path (no trailing "/") and src is a file, use the
+		// parent directory so the file lands at the exact destination path.
+		destDir := entry.Dst
+		if !info.IsDir() && !strings.HasSuffix(destDir, "/") {
+			destDir = filepath.Dir(destDir) + "/"
+		}
+		if err := uploadToVM(vmName, destDir, src, info.IsDir()); err != nil {
 			fmt.Fprintf(os.Stderr, "  WARNING: failed to sync %s: %v\n", entry.Src, err)
 		} else {
 			fmt.Printf("  synced %s -> %s\n", entry.Src, entry.Dst)

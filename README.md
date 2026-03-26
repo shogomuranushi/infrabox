@@ -175,7 +175,8 @@ ib setup-script show            # Show current setup script
 ib setup-script delete          # Remove setup script
 
 # Auto-sync: transfer local files/dirs to every new VM on creation
-ib sync add ~/.claude/settings.json /home/ubuntu/.claude/  # Register a file
+ib sync add ~/.claude/settings.json /home/ubuntu/.claude/  # dst = directory
+ib sync add ~/.claude.json /home/ubuntu/.claude.json       # dst = exact file path
 ib sync list                                               # List sync entries
 ib sync remove ~/.claude/settings.json                     # Remove an entry
 ib sync now my-app                                         # Sync to existing VM

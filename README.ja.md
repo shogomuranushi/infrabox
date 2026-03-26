@@ -175,7 +175,8 @@ ib setup-script show            # 登録中のスクリプトを表示
 ib setup-script delete          # スクリプトを削除
 
 # 自動同期: VM 作成時にローカルのファイル/ディレクトリを自動転送
-ib sync add ~/.claude/settings.json /home/ubuntu/.claude/  # 転送リストに追加
+ib sync add ~/.claude/settings.json /home/ubuntu/.claude/  # dst = ディレクトリ
+ib sync add ~/.claude.json /home/ubuntu/.claude.json       # dst = ファイルパス指定も可
 ib sync list                                               # 登録済みエントリ一覧
 ib sync remove ~/.claude/settings.json                     # エントリを削除
 ib sync now my-app                                         # 既存 VM にも転送
