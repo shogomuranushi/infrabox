@@ -17,7 +17,7 @@
 エンジニアひとりひとりに、秒速でLinuxマシンを届けるツールです。
 
 ```bash
-$ ib new my-app
+$ ib create my-app
 完了（7秒）
 
   Shell: ib ssh my-app
@@ -49,6 +49,8 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 | 🛡️ | ユーザーごとの Namespace 分離 & ResourceQuota |
 | 💾 | 永続ディスク（GCE PD / PVC） |
 | 📁 | rclone による Google Drive コンテキスト共有 |
+| 🔑 | VM ごとの oauth2 認証トグル（エンドポイント単位で有効/無効） |
+| 📊 | リソース使用量の可視化（`ib top` / `ib admin top`） |
 | 📦 | `ib` CLI ツール |
 
 ---
@@ -64,7 +66,7 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
                        │ HTTPS:443
                        ▼
 ┌────────────────────────────────────────────────────────┐
-│              Kubernetes Cluster (k3s)                  │
+│      Kubernetes Cluster（k3s または GKE Standard）      │
 │                                                        │
 │  API Node (on-demand)                                  │
 │  ┌──────────────────────────────────────────────────┐  │
@@ -134,13 +136,13 @@ Endpoint [https://api.infrabox.example.com]:
 Name (e.g. your email): you@example.com
 Invitation code: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
-✓ Setup complete. Run 'ib new <name>' to create a VM.
+✓ Setup complete. Run 'ib create <name>' to create a VM.
 ```
 
 #### 3. 最初のVMを作る
 
 ```bash
-ib new my-app
+ib create my-app
 ```
 
 ```
@@ -153,13 +155,16 @@ Ready (7s)
 #### CLI コマンド一覧
 
 ```bash
-ib new my-app              # VM を作成
+ib create my-app           # VM を作成
 ib list                    # VM 一覧
 ib ssh my-app              # VM でシェルを開く
 ib scp ./file myvm:/tmp/   # ファイルを VM にアップロード
 ib scp myvm:/tmp/f ./      # ファイルを VM からダウンロード
 ib rename old new          # VM をリネーム
 ib delete my-app           # VM を削除
+ib auth enable my-app      # VM の HTTPS エンドポイントに oauth2 認証を有効化
+ib auth disable my-app     # 認証を無効化（完全オープン）
+ib top                     # 自分のリソース使用量を表示（CPU / メモリ / VM 数）
 ib upgrade                 # CLI を最新版に更新
 ```
 
@@ -167,7 +172,9 @@ ib upgrade                 # CLI を最新版に更新
 
 ### 管理者向け
 
-#### 1. サーバーのデプロイ（GCE + Terraform）
+#### 1. サーバーのデプロイ
+
+**オプション A — GCE + k3s（Terraform）**
 
 ```bash
 cd scripts/terraform-gce
@@ -178,6 +185,18 @@ terraform apply
 
 必須変数: `gcp_project`, `domain`, `letsencrypt_email`。
 詳細オプションは [scripts/terraform-gce/](./scripts/terraform-gce/) を参照。
+
+**オプション B — GKE Standard（Terraform）**
+
+```bash
+cd scripts/terraform-gke
+cp terraform.tfvars.example terraform.tfvars  # 値を設定
+terraform init
+terraform apply
+```
+
+必須変数: `project_id`, `domain`, `letsencrypt_email`。
+詳細オプションは [scripts/terraform-gke/](./scripts/terraform-gke/) を参照。
 
 #### 2. 管理者APIキーを保存
 
@@ -198,6 +217,24 @@ ib admin invite list
 
 発行したコードをユーザーに共有し、`ib init` 実行時に入力してもらいます。
 
+#### 4. クラスターのリソース状況を確認
+
+```bash
+ib admin top
+```
+
+```
+╔═══════════════════════════════════════════════════════════════════╗
+║                     InfraBox Cluster Status                      ║
+╠═══════════════════════════════════════════════════════════════════╣
+
+  VM Worker Nodes (2)
+  ──────────────────────────────────────────────────────────────
+  gke-worker-0  CPU [████████░░░░░░░░░░░░]  45%  MEM [██████░░░░░░░░░░░░░░]  31%
+  gke-worker-1  CPU [███░░░░░░░░░░░░░░░░░░]  17%  MEM [████░░░░░░░░░░░░░░░░]  21%
+  ...
+```
+
 ---
 
 ## API エンドポイント
@@ -211,9 +248,12 @@ ib admin invite list
 | `DELETE` | `/v1/vms/{name}` | VM 削除 |
 | `PATCH` | `/v1/vms/{name}` | VM リネーム |
 | `POST` | `/v1/vms/{name}/restart` | VM 再起動 |
+| `PATCH` | `/v1/vms/{name}/auth` | oauth2 認証の有効/無効切り替え |
 | `GET` | `/v1/vms/{name}/exec` | WebSocket シェルセッション |
 | `POST` | `/v1/vms/{name}/files?path=` | ファイルアップロード（tar ストリーム） |
 | `GET` | `/v1/vms/{name}/files?path=` | ファイルダウンロード（tar ストリーム） |
+| `GET` | `/v1/resources` | 自分のリソース使用量を取得 |
+| `GET` | `/v1/admin/resources` | クラスター全体のリソース使用量を取得（管理者のみ） |
 
 `/healthz` と `/v1/keys` 以外のエンドポイントは `X-API-Key` ヘッダが必要です。
 
@@ -225,8 +265,8 @@ ib admin invite list
 |---|---|---|
 | ローカル（macOS + Docker） | 動作確認済み | [scripts/local-setup.sh](./scripts/local-setup.sh) |
 | GCE / VPS（k3s） | 動作確認済み | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
-| GCE（Terraform） | 動作確認済み | [scripts/terraform-gce/](./scripts/terraform-gce/) |
-| GKE / EKS などマネージド K8s | 対応予定 | — |
+| GCE（Terraform + k3s） | 動作確認済み | [scripts/terraform-gce/](./scripts/terraform-gce/) |
+| GKE Standard（Terraform） | 動作確認済み | [scripts/terraform-gke/](./scripts/terraform-gke/) |
 
 ---
 
