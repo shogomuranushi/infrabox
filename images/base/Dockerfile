@@ -22,10 +22,6 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
   && mv /root/.local/bin/uv /usr/local/bin/uv \
   && mv /root/.local/bin/uvx /usr/local/bin/uvx
 
-# Claude Code (native installer — move binary to /usr/local/bin for all users)
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-  && mv /root/.local/bin/claude /usr/local/bin/claude
-
 # Codex
 RUN npm install -g @openai/codex
 
@@ -33,6 +29,12 @@ RUN npm install -g @openai/codex
 RUN (id ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu) \
   && usermod -s /bin/zsh ubuntu \
   && echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Claude Code (native installer, installed as ubuntu so auto-update works)
+RUN su -s /bin/bash ubuntu -c "curl -fsSL https://claude.ai/install.sh | bash"
+
+# Make ~/.local/bin available in login shells for all users
+RUN echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin.sh
 
 # rclone (Google Drive sync for context sharing)
 RUN curl https://rclone.org/install.sh | bash
