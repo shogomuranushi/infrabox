@@ -51,6 +51,7 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 | 📁 | rclone による Google Drive コンテキスト共有 |
 | 🔑 | VM ごとの oauth2 認証トグル（エンドポイント単位で有効/無効） |
 | 📊 | リソース使用量の可視化（`ib top` / `ib admin top`） |
+| 🔄 | ローカルファイルを新規 VM に自動転送（`ib sync`） |
 | 📦 | `ib` CLI ツール |
 
 ---
@@ -157,7 +158,7 @@ Ready (7s)
 ```bash
 ib create my-app           # VM を作成
 ib list                    # VM 一覧
-ib ssh my-app              # VM でシェルを開く
+ib ssh my-app              # VM でシェルを開く（ubuntu ユーザーでログイン）
 ib scp ./file myvm:/tmp/   # ファイルを VM にアップロード
 ib scp myvm:/tmp/f ./      # ファイルを VM からダウンロード
 ib rename old new          # VM をリネーム
@@ -166,6 +167,12 @@ ib auth enable my-app      # VM の HTTPS エンドポイントに oauth2 認証
 ib auth disable my-app     # 認証を無効化（完全オープン）
 ib top                     # 自分のリソース使用量を表示（CPU / メモリ / VM 数）
 ib upgrade                 # CLI を最新版に更新
+
+# 自動同期: VM 作成時にローカルのファイル/ディレクトリを自動転送
+ib sync add ~/.claude/settings.json /home/ubuntu/.claude/  # 転送リストに追加
+ib sync list                                               # 登録済みエントリ一覧
+ib sync remove ~/.claude/settings.json                     # エントリを削除
+ib sync now my-app                                         # 既存 VM にも転送
 ```
 
 ---

@@ -264,6 +264,10 @@ fi`,
 							Name:            "vm",
 							Image:           cfg.BaseImage,
 							ImagePullPolicy: corev1.PullIfNotPresent,
+							SecurityContext: &corev1.SecurityContext{
+								RunAsUser:  pointer.Int64(1000),
+								RunAsGroup: pointer.Int64(1000),
+							},
 							Ports: []corev1.ContainerPort{
 								{ContainerPort: 8000},
 							},
