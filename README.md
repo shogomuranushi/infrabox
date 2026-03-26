@@ -51,6 +51,7 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 | 📁 | Google Drive context sharing via rclone |
 | 🔑 | Per-VM oauth2 auth toggle (enable / disable per endpoint) |
 | 📊 | Resource usage visualization (`ib top` / `ib admin top`) |
+| 📜 | First-boot setup script per user (`ib setup-script`) |
 | 🔄 | Auto-sync local files to every new VM (`ib sync`) |
 | 📦 | `ib` CLI tool |
 
@@ -167,6 +168,11 @@ ib auth enable my-app      # Enable oauth2 auth on the VM's HTTPS endpoint
 ib auth disable my-app     # Disable auth (fully open)
 ib top                     # Show your resource usage (CPU / memory / VMs)
 ib upgrade                 # Upgrade the CLI to the latest version
+
+# Setup script: run a shell script automatically on first VM boot
+ib setup-script set ./setup.sh  # Register a setup script
+ib setup-script show            # Show current setup script
+ib setup-script delete          # Remove setup script
 
 # Auto-sync: transfer local files/dirs to every new VM on creation
 ib sync add ~/.claude/settings.json /home/ubuntu/.claude/  # Register a file
