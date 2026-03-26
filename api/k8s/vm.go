@@ -219,7 +219,7 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName:  "setup-" + cfg.Name,
-					DefaultMode: pointer.Int32(0755),
+					DefaultMode: pointer.Int32(0o755),
 				},
 			},
 		})

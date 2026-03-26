@@ -105,7 +105,10 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	// Look up the user's setup script (if any)
 	var setupScript string
 	if user != "" {
-		if script, err := h.db.GetSetupScript(user); err == nil && script != nil {
+		script, err := h.db.GetSetupScript(user)
+		if err != nil {
+			log.Printf("WARN: failed to get setup script for %s: %v", user, err)
+		} else if script != nil {
 			setupScript = string(script)
 		}
 	}

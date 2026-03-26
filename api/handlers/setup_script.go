@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -47,7 +48,8 @@ func (h *Handler) SaveSetupScript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.SaveSetupScript(uuid.NewString(), user, []byte(req.Script)); err != nil {
-		jsonError(w, "failed to save setup script: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("ERROR saving setup script for %s: %v", user, err)
+		jsonError(w, "failed to save setup script", http.StatusInternalServerError)
 		return
 	}
 
@@ -64,7 +66,8 @@ func (h *Handler) GetSetupScript(w http.ResponseWriter, r *http.Request) {
 
 	script, err := h.db.GetSetupScript(user)
 	if err != nil {
-		jsonError(w, "failed to get setup script: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("ERROR getting setup script for %s: %v", user, err)
+		jsonError(w, "failed to get setup script", http.StatusInternalServerError)
 		return
 	}
 	if script == nil {
@@ -84,7 +87,8 @@ func (h *Handler) DeleteSetupScript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.DeleteSetupScript(user); err != nil {
-		jsonError(w, "failed to delete setup script: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("ERROR deleting setup script for %s: %v", user, err)
+		jsonError(w, "failed to delete setup script", http.StatusInternalServerError)
 		return
 	}
 
