@@ -31,6 +31,7 @@ type NodeResourceResponse struct {
 type NodeResourceDetail struct {
 	Allocatable int64 `json:"allocatable"`
 	Requests    int64 `json:"requests"`
+	VMRequests  int64 `json:"vm_requests"` // managed-by=infrabox pods only
 }
 
 type NamespaceResourceResponse struct {
@@ -104,8 +105,8 @@ func (h *Handler) GetAdminResources(w http.ResponseWriter, r *http.Request) {
 		resp.Nodes = append(resp.Nodes, NodeResourceResponse{
 			Name:   n.Name,
 			Role:   n.Role,
-			CPU:    NodeResourceDetail{Allocatable: n.CPUAllocatable, Requests: n.CPURequests},
-			Memory: NodeResourceDetail{Allocatable: n.MemoryAllocatable, Requests: n.MemoryRequests},
+			CPU:    NodeResourceDetail{Allocatable: n.CPUAllocatable, Requests: n.CPURequests, VMRequests: n.VMCPURequests},
+			Memory: NodeResourceDetail{Allocatable: n.MemoryAllocatable, Requests: n.MemoryRequests, VMRequests: n.VMMemoryRequests},
 		})
 		resp.Totals.TotalCPU += n.CPUAllocatable
 		resp.Totals.UsedCPU += n.CPURequests
