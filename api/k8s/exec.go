@@ -6,12 +6,19 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
+)
+
+const (
+	sshPingInterval = 30 * time.Second
+	sshIdleTimeout  = 8 * time.Hour
 )
 
 // ExecPod opens an interactive shell in the VM pod and bridges it to a WebSocket connection.
@@ -41,6 +48,37 @@ func (c *Client) ExecPod(ctx context.Context, namespace, name string, conn *webs
 	}
 
 	ws := &wsStream{conn: conn}
+	ws.lastActivity.Store(time.Now().UnixNano())
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Keepalive: send ping every 30s to prevent proxy timeouts.
+	// Idle timeout: close the session after 8h of no stdin activity.
+	go func() {
+		ping := time.NewTicker(sshPingInterval)
+		idle := time.NewTicker(time.Minute)
+		defer ping.Stop()
+		defer idle.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ping.C:
+				if err := ws.sendPing(); err != nil {
+					cancel()
+					return
+				}
+			case <-idle.C:
+				last := time.Unix(0, ws.lastActivity.Load())
+				if time.Since(last) > sshIdleTimeout {
+					ws.sendClose("idle timeout")
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 
 	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdin:             ws,
@@ -134,11 +172,12 @@ func (c *Client) findVMPod(ctx context.Context, namespace, name string) (string,
 // wsStream bridges a WebSocket connection to K8s remotecommand streams.
 // It implements io.Reader, io.Writer, and remotecommand.TerminalSizeQueue.
 type wsStream struct {
-	conn   *websocket.Conn
-	mu     sync.Mutex
-	buf    []byte
-	resize chan *remotecommand.TerminalSize
-	once   sync.Once
+	conn         *websocket.Conn
+	mu           sync.Mutex   // protects all writes to conn
+	buf          []byte
+	resize       chan *remotecommand.TerminalSize
+	once         sync.Once
+	lastActivity atomic.Int64 // unix nano, updated on each stdin keystroke
 }
 
 func (ws *wsStream) initResize() {
@@ -176,8 +215,25 @@ func (ws *wsStream) Read(p []byte) (int, error) {
 			continue
 		}
 
+		// Stdin data — update last activity timestamp.
+		ws.lastActivity.Store(time.Now().UnixNano())
 		ws.buf = data
 	}
+}
+
+// sendPing sends a WebSocket ping frame to keep the connection alive through proxies.
+func (ws *wsStream) sendPing() error {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	return ws.conn.WriteMessage(websocket.PingMessage, nil)
+}
+
+// sendClose sends a WebSocket close frame with the given reason.
+func (ws *wsStream) sendClose(reason string) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	ws.conn.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, reason))
 }
 
 // Write sends data to the WebSocket (stdout/stderr to client).
