@@ -22,8 +22,11 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
   && mv /root/.local/bin/uv /usr/local/bin/uv \
   && mv /root/.local/bin/uvx /usr/local/bin/uvx
 
-# Claude Code & Codex
-RUN npm install -g @anthropic-ai/claude-code @openai/codex
+# Claude Code (native installer)
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+# Codex
+RUN npm install -g @openai/codex
 
 # User setup
 RUN (id ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu) \
