@@ -28,6 +28,7 @@ type VMConfig struct {
 	NodeSelector            map[string]string // optional: schedule VM pods on specific nodes
 	RcloneDriveClientID     string            // optional: OAuth client ID for rclone Google Drive sync
 	RcloneDriveClientSecret string            // optional: OAuth client secret for rclone Google Drive sync
+	SetupScript             string            // optional: shell script to run on first boot
 }
 
 // sanitizeOwner converts an owner string (typically email) to a value safe for
@@ -90,22 +91,31 @@ func (c *Client) EnsureUserNamespace(ctx context.Context, namespace, cpuQuota, m
 
 // CreateVM creates all K8s resources for a VM.
 func (c *Client) CreateVM(ctx context.Context, cfg VMConfig) error {
+	if cfg.SetupScript != "" {
+		if err := c.createSetupSecret(ctx, cfg); err != nil {
+			return fmt.Errorf("setup secret: %w", err)
+		}
+	}
 	if err := c.createDeployment(ctx, cfg); err != nil {
+		c.deleteSetupSecret(ctx, cfg.Namespace, cfg.Name)
 		return fmt.Errorf("deployment: %w", err)
 	}
 	if err := c.createPVC(ctx, cfg); err != nil {
 		c.deleteDeployment(ctx, cfg.Namespace, cfg.Name)
+		c.deleteSetupSecret(ctx, cfg.Namespace, cfg.Name)
 		return fmt.Errorf("pvc: %w", err)
 	}
 	if err := c.createService(ctx, cfg); err != nil {
 		c.deleteDeployment(ctx, cfg.Namespace, cfg.Name)
 		c.deletePVC(ctx, cfg.Namespace, cfg.Name)
+		c.deleteSetupSecret(ctx, cfg.Namespace, cfg.Name)
 		return fmt.Errorf("service: %w", err)
 	}
 	if err := c.createIngress(ctx, cfg); err != nil {
 		c.deleteDeployment(ctx, cfg.Namespace, cfg.Name)
 		c.deletePVC(ctx, cfg.Namespace, cfg.Name)
 		c.deleteService(ctx, cfg.Namespace, cfg.Name)
+		c.deleteSetupSecret(ctx, cfg.Namespace, cfg.Name)
 		return fmt.Errorf("ingress: %w", err)
 	}
 	return nil
@@ -117,6 +127,7 @@ func (c *Client) DeleteVM(ctx context.Context, namespace, name string) error {
 	c.deleteService(ctx, namespace, name)
 	c.deleteDeployment(ctx, namespace, name)
 	c.deletePVC(ctx, namespace, name)
+	c.deleteSetupSecret(ctx, namespace, name)
 	return nil
 }
 
@@ -174,6 +185,66 @@ func vmEnv(cfg VMConfig) []corev1.EnvVar {
 }
 
 func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
+	initContainers := []corev1.Container{
+		{
+			Name:            "fix-perms",
+			Image:           cfg.BaseImage,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command: []string{"bash", "-c",
+				"chown ubuntu:ubuntu /home/ubuntu && chmod 750 /home/ubuntu",
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "home", MountPath: "/home/ubuntu"},
+			},
+			Resources: initResources(),
+		},
+	}
+
+	volumes := []corev1.Volume{
+		{
+			Name: "home",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: "pvc-" + cfg.Name,
+				},
+			},
+		},
+	}
+
+	// If a setup script is configured, add an init container to run it on first boot.
+	// The script runs as the ubuntu user. A marker file prevents re-execution on restart.
+	if cfg.SetupScript != "" {
+		volumes = append(volumes, corev1.Volume{
+			Name: "setup-script",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName:  "setup-" + cfg.Name,
+					DefaultMode: pointer.Int32(0o755),
+				},
+			},
+		})
+		initContainers = append(initContainers, corev1.Container{
+			Name:            "run-setup",
+			Image:           cfg.BaseImage,
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command: []string{"bash", "-c",
+				`if [ ! -f /home/ubuntu/.setup-done ]; then
+  echo "Running setup script..."
+  su -s /bin/bash ubuntu -c /opt/setup/setup.sh
+  touch /home/ubuntu/.setup-done
+  echo "Setup complete."
+else
+  echo "Setup already completed, skipping."
+fi`,
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "home", MountPath: "/home/ubuntu"},
+				{Name: "setup-script", MountPath: "/opt/setup", ReadOnly: true},
+			},
+			Resources: initResources(),
+		})
+	}
+
 	_, err := c.Clientset.AppsV1().Deployments(cfg.Namespace).Create(ctx, &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "vm-" + cfg.Name,
@@ -186,31 +257,8 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: vmLabels(cfg.Name, cfg.Owner)},
 				Spec: corev1.PodSpec{
-					NodeSelector: cfg.NodeSelector,
-					// initContainer: fix PVC permissions after mount
-					InitContainers: []corev1.Container{
-						{
-							Name:            "fix-perms",
-							Image:           cfg.BaseImage,
-							ImagePullPolicy: corev1.PullIfNotPresent,
-							Command: []string{"bash", "-c",
-								"chown ubuntu:ubuntu /home/ubuntu && chmod 750 /home/ubuntu",
-							},
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "home", MountPath: "/home/ubuntu"},
-							},
-							Resources: corev1.ResourceRequirements{
-								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("100m"),
-									corev1.ResourceMemory: resource.MustParse("400Mi"),
-								},
-								Limits: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse("1000m"),
-									corev1.ResourceMemory: resource.MustParse("2Gi"),
-								},
-							},
-						},
-					},
+					NodeSelector:   cfg.NodeSelector,
+					InitContainers: initContainers,
 					Containers: []corev1.Container{
 						{
 							Name:            "vm",
@@ -235,21 +283,25 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 							},
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "home",
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: "pvc-" + cfg.Name,
-								},
-							},
-						},
-					},
+					Volumes: volumes,
 				},
 			},
 		},
 	}, metav1.CreateOptions{})
 	return err
+}
+
+func initResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("400Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("1000m"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
+		},
+	}
 }
 
 func (c *Client) createPVC(ctx context.Context, cfg VMConfig) error {
@@ -344,6 +396,24 @@ func (c *Client) deleteService(ctx context.Context, namespace, name string) {
 
 func (c *Client) deleteIngress(ctx context.Context, namespace, name string) {
 	c.Clientset.NetworkingV1().Ingresses(namespace).Delete(ctx, "vm-"+name+"-ingress", metav1.DeleteOptions{})
+}
+
+func (c *Client) createSetupSecret(ctx context.Context, cfg VMConfig) error {
+	_, err := c.Clientset.CoreV1().Secrets(cfg.Namespace).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "setup-" + cfg.Name,
+			Namespace: cfg.Namespace,
+			Labels:    vmLabels(cfg.Name, cfg.Owner),
+		},
+		Data: map[string][]byte{
+			"setup.sh": []byte(cfg.SetupScript),
+		},
+	}, metav1.CreateOptions{})
+	return err
+}
+
+func (c *Client) deleteSetupSecret(ctx context.Context, namespace, name string) {
+	c.Clientset.CoreV1().Secrets(namespace).Delete(ctx, "setup-"+name, metav1.DeleteOptions{})
 }
 
 func vmLabels(name string, owner string) map[string]string {

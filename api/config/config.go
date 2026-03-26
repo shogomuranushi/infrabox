@@ -22,6 +22,7 @@ type Config struct {
 	VMNodeSelector          map[string]string // nodeSelector for VM pods (e.g. infrabox-role=vm-worker)
 	RcloneDriveClientID     string            // optional: OAuth client ID for rclone Google Drive sync
 	RcloneDriveClientSecret string            // optional: OAuth client secret for rclone Google Drive sync
+	EncryptionKey           string            // 32-byte hex-encoded key for AES-256-GCM encryption of setup scripts
 }
 
 func Load() *Config {
@@ -41,6 +42,7 @@ func Load() *Config {
 		VMNodeSelector:          parseNodeSelector(getEnv("INFRABOX_VM_NODE_SELECTOR", "")),
 		RcloneDriveClientID:     getEnv("INFRABOX_RCLONE_DRIVE_CLIENT_ID", ""),
 		RcloneDriveClientSecret: getEnv("INFRABOX_RCLONE_DRIVE_CLIENT_SECRET", ""),
+		EncryptionKey:           getEnv("INFRABOX_ENCRYPTION_KEY", ""),
 	}
 }
 

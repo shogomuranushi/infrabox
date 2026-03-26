@@ -102,6 +102,17 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Look up the user's setup script (if any)
+	var setupScript string
+	if user != "" {
+		script, err := h.db.GetSetupScript(user)
+		if err != nil {
+			log.Printf("WARN: failed to get setup script for %s: %v", user, err)
+		} else if script != nil {
+			setupScript = string(script)
+		}
+	}
+
 	ingressHost := h.ingressHost(req.Name)
 	k8sCfg := k8sclient.VMConfig{
 		Name:                    req.Name,
@@ -116,6 +127,7 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 		NodeSelector:            h.cfg.VMNodeSelector,
 		RcloneDriveClientID:     h.cfg.RcloneDriveClientID,
 		RcloneDriveClientSecret: h.cfg.RcloneDriveClientSecret,
+		SetupScript:             setupScript,
 	}
 
 	if err := h.k8s.CreateVM(r.Context(), k8sCfg); err != nil {

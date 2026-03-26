@@ -26,16 +26,25 @@ type VM struct {
 	UpdatedAt   time.Time
 }
 
-type DB struct {
-	conn *sql.DB
+type SetupScript struct {
+	ID              string
+	Owner           string
+	EncryptedScript string // base64-encoded AES-256-GCM ciphertext
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
-func Open(path string) (*DB, error) {
+type DB struct {
+	conn          *sql.DB
+	encryptionKey []byte // 32-byte key for AES-256-GCM
+}
+
+func Open(path string, encryptionKey []byte) (*DB, error) {
 	conn, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
-	d := &DB{conn: conn}
+	d := &DB{conn: conn, encryptionKey: encryptionKey}
 	if err := d.migrate(); err != nil {
 		return nil, err
 	}
@@ -77,6 +86,20 @@ func (d *DB) migrate() error {
 			used_by    TEXT NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL,
 			used_at    DATETIME
+		);
+	`)
+	if err != nil {
+		return err
+	}
+
+	// Setup scripts table (one per user, encrypted)
+	_, err = d.conn.Exec(`
+		CREATE TABLE IF NOT EXISTS setup_scripts (
+			id               TEXT PRIMARY KEY,
+			owner            TEXT NOT NULL UNIQUE,
+			encrypted_script TEXT NOT NULL,
+			created_at       DATETIME NOT NULL,
+			updated_at       DATETIME NOT NULL
 		);
 	`)
 	return err
@@ -262,6 +285,57 @@ func (d *DB) ListInvitationCodes() ([]*InvitationCode, error) {
 		codes = append(codes, ic)
 	}
 	return codes, rows.Err()
+}
+
+// SaveSetupScript creates or updates the setup script for the given owner.
+// The script content is encrypted before storage.
+func (d *DB) SaveSetupScript(id, owner string, script []byte) error {
+	if len(d.encryptionKey) == 0 {
+		return fmt.Errorf("encryption key not configured")
+	}
+	encrypted, err := Encrypt(script, d.encryptionKey)
+	if err != nil {
+		return fmt.Errorf("encrypt: %w", err)
+	}
+	now := time.Now()
+	_, err = d.conn.Exec(
+		`INSERT INTO setup_scripts (id, owner, encrypted_script, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(owner) DO UPDATE SET encrypted_script = excluded.encrypted_script, updated_at = excluded.updated_at`,
+		id, owner, encrypted, now, now,
+	)
+	return err
+}
+
+// GetSetupScript returns the decrypted setup script for the given owner.
+func (d *DB) GetSetupScript(owner string) ([]byte, error) {
+	if len(d.encryptionKey) == 0 {
+		return nil, fmt.Errorf("encryption key not configured")
+	}
+	var encrypted string
+	err := d.conn.QueryRow(
+		`SELECT encrypted_script FROM setup_scripts WHERE owner = ?`, owner,
+	).Scan(&encrypted)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return Decrypt(encrypted, d.encryptionKey)
+}
+
+// DeleteSetupScript removes the setup script for the given owner.
+func (d *DB) DeleteSetupScript(owner string) error {
+	res, err := d.conn.Exec(`DELETE FROM setup_scripts WHERE owner = ?`, owner)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("setup script not found")
+	}
+	return nil
 }
 
 // RenameVM changes the name of an existing VM. If owner is non-empty, only the owner's VM is affected.

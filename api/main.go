@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"log"
 	"net/http"
 	"os"
@@ -26,7 +27,17 @@ func main() {
 		cfg.DBPath = "./infrabox.db"
 	}
 
-	database, err := db.Open(cfg.DBPath)
+	var encryptionKey []byte
+	if cfg.EncryptionKey != "" {
+		var err error
+		encryptionKey, err = hex.DecodeString(cfg.EncryptionKey)
+		if err != nil || len(encryptionKey) != 32 {
+			log.Fatal("INFRABOX_ENCRYPTION_KEY must be a 64-character hex string (32 bytes)")
+		}
+		log.Printf("Encryption key configured for setup scripts")
+	}
+
+	database, err := db.Open(cfg.DBPath, encryptionKey)
 	if err != nil {
 		log.Fatalf("failed to open db: %v", err)
 	}
@@ -63,6 +74,11 @@ func main() {
 		r.Get("/v1/vms/{name}/exec", h.ExecVM)
 		r.Post("/v1/vms/{name}/files", h.UploadFile)
 		r.Get("/v1/vms/{name}/files", h.DownloadFile)
+
+		// Setup script (per-user, encrypted)
+		r.Put("/v1/setup-script", h.SaveSetupScript)
+		r.Get("/v1/setup-script", h.GetSetupScript)
+		r.Delete("/v1/setup-script", h.DeleteSetupScript)
 
 		// Resource usage
 		r.Get("/v1/resources", h.GetResources)
