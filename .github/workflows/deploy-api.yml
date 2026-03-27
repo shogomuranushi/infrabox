@@ -11,9 +11,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/infrabox-api
-  CLUSTER_NAME: infrabox
-  CLUSTER_ZONE: asia-northeast1-b
-  DEPLOY_NAMESPACE: infrabox
+  CLUSTER_NAME: ${{ vars.GKE_CLUSTER_NAME }}
+  CLUSTER_ZONE: ${{ vars.GKE_CLUSTER_ZONE }}
+  DEPLOY_NAMESPACE: ${{ vars.GKE_DEPLOY_NAMESPACE || 'infrabox' }}
 
 jobs:
   build-and-push:
