@@ -137,6 +137,14 @@ ib auth disable my-app  # 認証なしの完全オープンに戻す
 
 実装直後に気づいたのですが、クライアントが `X-Auth-Request-Email` ヘッダーを偽造して送れば認証をバイパスできてしまいます。oauth2-proxy が認証後にセットするヘッダーを、クライアントが先に偽造して送れば、認証済みユーザーとして扱われてしまう。nginx の `configuration-snippet` で ingress レイヤーでそのヘッダーを strip するよう修正しました。oauth2-proxy より手前でヘッダーを消す、という構成です。
 
+### クラウド依存をゼロにする
+
+HTTPS の終端と証明書管理に、GKE のマネージドロードバランサーや AWS の ALB + ACM ではなく、**nginx-ingress + cert-manager + Let's Encrypt** の組み合わせを使っています。
+
+GKE 専用の機能に依存すれば設定はシンプルになりますが、そのぶん他の環境に持ち込めなくなります。nginx-ingress と cert-manager は Kubernetes さえあればどこでも動くので、GKE でも GCE + k3s でも、AWS や Azure でも、オンプレでも、同じ構成でそのまま動きます。実際に InfraBox は GKE と k3s の両方に対応しており、Terraform の変数を切り替えるだけでどちらにもデプロイできます。
+
+「どの会社のクラウドを使っているか」に関係なく導入できる、というのは顧客環境への展開を考えると重要な設計判断です。
+
 ### ib sync — VM を作るたびにファイルを自動転送
 
 Claude Code を使う方なら、`~/.claude/settings.json` や `~/.claude.json` を VM に毎回コピーするのが地味に面倒だと感じると思います。
