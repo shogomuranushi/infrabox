@@ -104,7 +104,7 @@ func (c *Client) CopyToPod(ctx context.Context, namespace, name, destPath string
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "vm",
-			Command:   []string{"bash", "-c", "mkdir -p " + destPath + " && tar xf - -C " + destPath},
+			Command:   []string{"bash", "-c", "mkdir -p -- \"$1\" && tar xf - -C \"$1\"", "--", destPath},
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
