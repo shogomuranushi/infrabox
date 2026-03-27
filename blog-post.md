@@ -179,6 +179,32 @@ ib ssh agent-01
 
 ---
 
+## Kubernetes だからこそできたこと
+
+InfraBox を作っていて、「これ Kubernetes なしだと自前実装が大変だったな」と感じた部分がいくつかあります。
+
+**「VM を作る」= 4つのリソースを作るだけ**
+
+`ib create` の内部では Kubernetes の Deployment・PVC・Service・Ingress を順番に作っているだけです。削除も同じで、4つを消すだけ。VM の状態管理（起動しているか、落ちていないか）は Deployment コントローラーが面倒を見てくれます。`ib restart` に至っては Pod を delete するだけで、Deployment が自動で新しい Pod を立ち上げてくれます。自前で VM ライフサイクルを管理するコードをゼロから書いていたら、それだけで相当なコード量になっていたと思います。
+
+**HTTPS URL が「勝手に」生えてくる**
+
+`ib create` で Ingress リソースを作ると、cert-manager が annotation を検知して自動で Let's Encrypt の TLS 証明書を取得します。nginx-ingress はその証明書を使ってルーティングを設定します。InfraBox API は「Ingress を作った」という事実を K8s に伝えるだけで、証明書の取得・更新・ルーティングの設定はすべて K8s 側のコントローラーがやってくれます。
+
+**認証の ON/OFF = annotation を1行書き換えるだけ**
+
+`ib auth enable my-app` の実装は、Ingress リソースの annotation に oauth2-proxy の設定を追記するだけです。nginx-ingress はその変更を即座に拾って認証を有効にします。`ib auth disable` は annotation を削除するだけ。Ingress リソースが「設定の SSoT（唯一の信頼できる情報源）」として機能しているので、API 側はステートをほとんど持たなくて済んでいます。
+
+**ユーザーごとの Namespace + ResourceQuota で多テナント分離**
+
+ユーザーが最初に VM を作るとき、そのユーザー専用の Kubernetes Namespace を作り、ResourceQuota でリソース上限を設定します。あるユーザーが VM を作りすぎても、quota を超えた時点で K8s がブロックするので、ほかのユーザーやシステムへの影響を遮断できます。Pod の exec も Namespace をまたげないので、ユーザー間の分離はかなり強固です。これを Docker だけで実現しようとすると、リソース管理・分離ともに相当作り込みが必要になります。
+
+**Pod の Watch API で起動完了を検知**
+
+`ib create` は VM の起動を待ってから返します。その実装は K8s の Watch API を使っていて、Pod の状態変化をイベントとして受け取ります。ポーリングではないので、起動した瞬間に検知できます。
+
+---
+
 ## 現在の状況
 
 ABEJA 社内で実際に稼働しています。GKE Standard 上に展開していて、エンジニアが PoC や実験環境として日常的に使っています。
