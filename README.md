@@ -31,7 +31,7 @@ Ready (7s)
 - **Resource-efficient** — unlike traditional VMs that lock in fixed resources, containers stay minimal when idle and scale up automatically when in use — fitting far more environments on the same infrastructure
 
 Unlike enterprise-grade dev environment platforms, InfraBox is intentionally thin.
-No Terraform. No databases to manage. Just Kubernetes + a handful of OSS components.
+Just Kubernetes + a handful of OSS components.
 
 ---
 
@@ -47,7 +47,7 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
 | 🔐 | Google Workspace & Entra ID SSO |
 | 🎟️ | Invitation code system for open-mode registration |
 | 🛡️ | Per-user namespace isolation & ResourceQuota |
-| 💾 | Persistent disk (GCE PD / PVC) |
+| 💾 | Persistent disk (PVC) |
 | 📁 | Google Drive context sharing via rclone |
 | 🔑 | Per-VM oauth2 auth toggle (enable / disable per endpoint) |
 | 📊 | Resource usage visualization (`ib top` / `ib admin top`) |
@@ -68,7 +68,7 @@ No Terraform. No databases to manage. Just Kubernetes + a handful of OSS compone
                        │ HTTPS:443
                        ▼
 ┌────────────────────────────────────────────────────────┐
-│         Kubernetes Cluster (k3s or GKE Standard)       │
+│              Kubernetes Cluster                         │
 │                                                        │
 │  API Node (on-demand)                                  │
 │  ┌──────────────────────────────────────────────────┐  │
@@ -188,20 +188,6 @@ ib sync now my-app                                         # Sync to existing VM
 
 #### 1. Deploy the server
 
-**Option A — GCE + k3s (Terraform)**
-
-```bash
-cd scripts/terraform-gce
-cp terraform.tfvars.example terraform.tfvars  # fill in your values
-terraform init
-terraform apply
-```
-
-Required variables: `gcp_project`, `domain`, `letsencrypt_email`.
-See [scripts/terraform-gce/](./scripts/terraform-gce/) for full options.
-
-**Option B — GKE Standard (Terraform)**
-
 ```bash
 cd scripts/terraform-gke
 cp terraform.tfvars.example terraform.tfvars  # fill in your values
@@ -278,8 +264,6 @@ All endpoints except `/healthz` and `/v1/keys` require `X-API-Key` header.
 | Environment | Status | Setup |
 |---|---|---|
 | Local (macOS + Docker) | Working | [scripts/local-setup.sh](./scripts/local-setup.sh) |
-| GCE / VPS (k3s) | Working | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
-| GCE (Terraform + k3s) | Working | [scripts/terraform-gce/](./scripts/terraform-gce/) |
 | GKE Standard (Terraform) | Working | [scripts/terraform-gke/](./scripts/terraform-gke/) |
 
 ---

@@ -31,7 +31,7 @@ $ ib create my-app
 - **リソース効率** — 従来のVMと違い固定リソースを専有しない。アイドル時は最小限のリソースしか使わず、使うときだけ自動で拡張するため、同じインフラにより多くの環境を効率よく収容できる
 
 エンタープライズ向け開発環境管理プラットフォームとは設計思想が異なります。
-Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動きます。
+Kubernetes と最小限の OSS だけで動きます。
 
 ---
 
@@ -47,7 +47,7 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
 | 🔐 | Google Workspace & Entra ID SSO |
 | 🎟️ | 招待コードによるオープンモード登録 |
 | 🛡️ | ユーザーごとの Namespace 分離 & ResourceQuota |
-| 💾 | 永続ディスク（GCE PD / PVC） |
+| 💾 | 永続ディスク（PVC） |
 | 📁 | rclone による Google Drive コンテキスト共有 |
 | 🔑 | VM ごとの oauth2 認証トグル（エンドポイント単位で有効/無効） |
 | 📊 | リソース使用量の可視化（`ib top` / `ib admin top`） |
@@ -68,7 +68,7 @@ Terraform 不要。DB 管理不要。Kubernetes と最小限の OSS だけで動
                        │ HTTPS:443
                        ▼
 ┌────────────────────────────────────────────────────────┐
-│      Kubernetes Cluster（k3s または GKE Standard）      │
+│              Kubernetes Cluster                         │
 │                                                        │
 │  API Node (on-demand)                                  │
 │  ┌──────────────────────────────────────────────────┐  │
@@ -188,20 +188,6 @@ ib sync now my-app                                         # 既存 VM にも転
 
 #### 1. サーバーのデプロイ
 
-**オプション A — GCE + k3s（Terraform）**
-
-```bash
-cd scripts/terraform-gce
-cp terraform.tfvars.example terraform.tfvars  # 値を設定
-terraform init
-terraform apply
-```
-
-必須変数: `gcp_project`, `domain`, `letsencrypt_email`。
-詳細オプションは [scripts/terraform-gce/](./scripts/terraform-gce/) を参照。
-
-**オプション B — GKE Standard（Terraform）**
-
 ```bash
 cd scripts/terraform-gke
 cp terraform.tfvars.example terraform.tfvars  # 値を設定
@@ -278,8 +264,6 @@ ib admin top
 | 環境 | 状態 | セットアップ |
 |---|---|---|
 | ローカル（macOS + Docker） | 動作確認済み | [scripts/local-setup.sh](./scripts/local-setup.sh) |
-| GCE / VPS（k3s） | 動作確認済み | [scripts/gce-setup.sh](./scripts/gce-setup.sh) |
-| GCE（Terraform + k3s） | 動作確認済み | [scripts/terraform-gce/](./scripts/terraform-gce/) |
 | GKE Standard（Terraform） | 動作確認済み | [scripts/terraform-gke/](./scripts/terraform-gke/) |
 
 ---
