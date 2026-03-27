@@ -135,19 +135,6 @@ ib auth disable my-app  # 認証なしの完全オープンに戻す
 
 実装直後に気づいたのですが、クライアントが `X-Auth-Request-Email` ヘッダーを偽造して送れば認証をバイパスできてしまいます。oauth2-proxy が認証後にセットするヘッダーを、クライアントが先に偽造して送れば、認証済みユーザーとして扱われてしまう。nginx の `configuration-snippet` で ingress レイヤーでそのヘッダーを strip するよう修正しました。oauth2-proxy より手前でヘッダーを消す、という構成です。
 
-### setup script — VM を作るたびに環境構築を自動化
-
-`ib sync` はファイルを転送するだけですが、もっとリッチな初期設定をしたい場合があります。たとえば GitHub CLI の認証、Notion の設定、特定のパッケージのインストールなど。
-
-`ib setup-script` を使うと、シェルスクリプトを一度登録しておけば `ib create` のたびに自動で実行されます。InitContainer として VM 起動前に走ります。
-
-```bash
-ib setup-script set ./setup.sh   # 登録
-ib create my-app                 # VM 作成時に自動実行
-```
-
-スクリプトの中身は API キーや認証情報を含む可能性があるので、DB には AES-256-GCM で暗号化して保存しています。マーカーファイル (`.setup-done`) で再起動時の二重実行も防いでいます。
-
 ### ib sync — VM を作るたびにファイルを自動転送
 
 Claude Code を使う方なら、`~/.claude/settings.json` や `~/.claude.json` を VM に毎回コピーするのが地味に面倒だと感じると思います。
@@ -177,15 +164,6 @@ ib ssh agent-01
 
 ハマったのが、root でインストールすると `~/.local/bin/claude` への自動アップデートが壊れるという点です。Claude Code のネイティブインストーラーはユーザーのホームディレクトリにバイナリを置くため、ubuntu ユーザーとして実行しないといけない。`/etc/profile.d/local-bin.sh` で `~/.local/bin` を PATH に追加する処理もあわせて入れています。
 
-### 細かいところで詰まった話
-
-いくつか「なんで動かないんだ」系のバグがありました。
-
-**SQLite の bool 問題**: Go で `auth_enabled bool` を SQLite に保存すると、`modernc.org/sqlite` ドライバーは bool を INTEGER に自動変換してくれません。結果、認証の ON/OFF が常に `false` になるというバグ。`boolToInt()` ヘルパーを作って明示的に 0/1 に変換することで解決しました。
-
-**Kubernetes label にメールアドレスは使えない**: ユーザーの識別子としてメールアドレスをそのまま Kubernetes の label value に使おうとしたら、`@` や `.` が label の文字制限に引っかかりました。`sanitizeOwner()` 関数で `@` や `.` を `-` に置換しています。
-
-**Windows で SIGWINCH が存在しない**: CLI をマルチプラットフォームビルドしようとしたら、`syscall.SIGWINCH`（ターミナルリサイズシグナル）が Windows に存在しないためビルドが通りませんでした。`//go:build !windows` の build constraint でプラットフォーム別のファイルに分離して解決しています。
 
 ---
 
