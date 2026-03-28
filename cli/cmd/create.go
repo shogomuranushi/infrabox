@@ -16,13 +16,20 @@ var createCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		mustConfig()
 		name := args[0]
+		storage, _ := cmd.Flags().GetString("storage")
 
 		fmt.Printf("Creating VM '%s'...\n", name)
+		if storage != "" && storage != "8Gi" {
+			fmt.Printf("  Storage: %s\n", storage)
+		}
 		start := time.Now()
 
-		data, status, err := apiRequest("POST", "/v1/vms", map[string]string{
-			"name": name,
-		})
+		body := map[string]string{"name": name}
+		if storage != "" {
+			body["storage"] = storage
+		}
+
+		data, status, err := apiRequest("POST", "/v1/vms", body)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
@@ -47,4 +54,8 @@ var createCmd = &cobra.Command{
 
 		applySync(name)
 	},
+}
+
+func init() {
+	createCmd.Flags().String("storage", "", "Storage size (e.g. 8Gi, 16Gi, 32Gi). Default: 8Gi")
 }

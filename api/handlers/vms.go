@@ -39,7 +39,8 @@ type VMResponse struct {
 }
 
 type CreateVMRequest struct {
-	Name string `json:"name"`
+	Name    string `json:"name"`
+	Storage string `json:"storage,omitempty"` // e.g. "16Gi" (default: "8Gi")
 }
 
 func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
@@ -114,10 +115,16 @@ func (h *Handler) CreateVM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ingressHost := h.ingressHost(req.Name)
+	storageSize := req.Storage
+	if storageSize == "" {
+		storageSize = "8Gi"
+	}
+
 	k8sCfg := k8sclient.VMConfig{
 		Name:                    req.Name,
 		Namespace:               vmNamespace,
 		StorageClass:            h.cfg.StorageClass,
+		StorageSize:             storageSize,
 		BaseImage:               h.cfg.BaseImage,
 		IngressClass:            h.cfg.IngressClass,
 		IngressHost:             ingressHost,

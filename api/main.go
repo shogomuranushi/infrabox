@@ -74,6 +74,7 @@ func main() {
 		r.Get("/v1/vms/{name}/exec", h.ExecVM)
 		r.Post("/v1/vms/{name}/files", h.UploadFile)
 		r.Get("/v1/vms/{name}/files", h.DownloadFile)
+		r.Get("/v1/vms/{name}/storage", h.StorageInfo)
 
 		// Setup script (per-user, encrypted)
 		r.Put("/v1/setup-script", h.SaveSetupScript)

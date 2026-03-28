@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -122,6 +123,108 @@ func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ERROR: download from %s: %v", name, err)
 		// Headers already sent, can't return JSON error
 	}
+}
+
+// StorageInfo returns storage usage information for a VM.
+// GET /v1/vms/{name}/storage?path=/home/ubuntu
+func (h *Handler) StorageInfo(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	vm, err := h.db.GetVM(name, currentUser(r))
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if vm == nil {
+		jsonError(w, "VM not found", http.StatusNotFound)
+		return
+	}
+
+	vmNamespace := vm.Namespace
+	if vmNamespace == "" {
+		vmNamespace = h.cfg.VMNamespace
+	}
+
+	// Get PVC capacity
+	capacity, err := h.k8s.GetPVCInfo(r.Context(), vmNamespace, name)
+	if err != nil {
+		log.Printf("WARN: failed to get PVC info for %s: %v", name, err)
+		capacity = "unknown"
+	}
+
+	// Get disk usage via df inside the pod
+	dfOutput, err := h.k8s.ExecCommand(r.Context(), vmNamespace, name, []string{
+		"df", "-B1", "--output=size,used,avail,pcent", "/home/ubuntu",
+	})
+	if err != nil {
+		log.Printf("ERROR: df for %s: %v", name, err)
+		jsonError(w, "failed to get storage info", http.StatusInternalServerError)
+		return
+	}
+
+	usage := parseDF(dfOutput)
+	usage["capacity"] = capacity
+
+	// Optionally list files
+	action := r.URL.Query().Get("action")
+	if action == "ls" {
+		lsPath := r.URL.Query().Get("path")
+		if lsPath == "" {
+			lsPath = "/home/ubuntu"
+		}
+		if !strings.HasPrefix(lsPath, "/") {
+			jsonError(w, "path must be absolute", http.StatusBadRequest)
+			return
+		}
+		lsOutput, err := h.k8s.ExecCommand(r.Context(), vmNamespace, name, []string{
+			"ls", "-lah", lsPath,
+		})
+		if err != nil {
+			log.Printf("ERROR: ls for %s: %v", name, err)
+			jsonError(w, "failed to list files", http.StatusInternalServerError)
+			return
+		}
+		usage["files"] = lsOutput
+	}
+
+	jsonOK(w, usage)
+}
+
+// parseDF parses the output of df -B1 --output=size,used,avail,pcent
+func parseDF(output string) map[string]interface{} {
+	result := map[string]interface{}{
+		"total_bytes": int64(0),
+		"used_bytes":  int64(0),
+		"avail_bytes": int64(0),
+		"use_percent": "0%",
+	}
+
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	if len(lines) < 2 {
+		return result
+	}
+
+	// Parse the data line (second line)
+	fields := strings.Fields(lines[1])
+	if len(fields) >= 4 {
+		if v, err := parseInt64(fields[0]); err == nil {
+			result["total_bytes"] = v
+		}
+		if v, err := parseInt64(fields[1]); err == nil {
+			result["used_bytes"] = v
+		}
+		if v, err := parseInt64(fields[2]); err == nil {
+			result["avail_bytes"] = v
+		}
+		result["use_percent"] = strings.TrimSpace(fields[3])
+	}
+
+	return result
+}
+
+func parseInt64(s string) (int64, error) {
+	var v int64
+	_, err := fmt.Sscanf(s, "%d", &v)
+	return v, err
 }
 
 // ResizeExec handles terminal resize requests.

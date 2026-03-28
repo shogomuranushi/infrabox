@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -151,6 +152,54 @@ func (c *Client) CopyFromPod(ctx context.Context, namespace, name, srcPath strin
 		Stdout: writer,
 		Stderr: io.Discard,
 	})
+}
+
+// ExecCommand runs a command in the VM pod and returns its stdout output.
+func (c *Client) ExecCommand(ctx context.Context, namespace, name string, command []string) (string, error) {
+	podName, err := c.findVMPod(ctx, namespace, name)
+	if err != nil {
+		return "", err
+	}
+
+	req := c.Clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: "vm",
+			Command:   command,
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+		}, scheme.ParameterCodec)
+
+	executor, err := remotecommand.NewSPDYExecutor(c.RestConfig, "POST", req.URL())
+	if err != nil {
+		return "", fmt.Errorf("create executor: %w", err)
+	}
+
+	var stdout, stderr strings.Builder
+	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		return "", fmt.Errorf("exec: %w (stderr: %s)", err, stderr.String())
+	}
+	return stdout.String(), nil
+}
+
+// GetPVCInfo returns the storage capacity of the PVC for a VM.
+func (c *Client) GetPVCInfo(ctx context.Context, namespace, name string) (capacity string, err error) {
+	pvc, err := c.Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, "pvc-"+name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("get pvc: %w", err)
+	}
+	if qty, ok := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
+		return qty.String(), nil
+	}
+	return "unknown", nil
 }
 
 // findVMPod returns the name of the first running pod for the given VM.

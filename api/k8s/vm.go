@@ -19,6 +19,7 @@ type VMConfig struct {
 	Name         string
 	Namespace    string
 	StorageClass string
+	StorageSize  string // e.g. "8Gi", "16Gi"
 	BaseImage    string
 	IngressClass string
 	IngressHost  string
@@ -309,7 +310,11 @@ func initResources() corev1.ResourceRequirements {
 }
 
 func (c *Client) createPVC(ctx context.Context, cfg VMConfig) error {
-	storageSize, _ := resource.ParseQuantity("8Gi")
+	sizeStr := cfg.StorageSize
+	if sizeStr == "" {
+		sizeStr = "8Gi"
+	}
+	storageSize, _ := resource.ParseQuantity(sizeStr)
 	_, err := c.Clientset.CoreV1().PersistentVolumeClaims(cfg.Namespace).Create(ctx, &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pvc-" + cfg.Name,
