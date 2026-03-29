@@ -6,16 +6,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-
-	"github.com/gorilla/websocket"
 )
 
-func watchResize(conn *websocket.Conn) {
+func watchResize(write func(int, []byte) error) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
 	go func() {
 		for range sigCh {
-			sendTermSize(conn)
+			sendTermSize(write)
 		}
 	}()
 }
