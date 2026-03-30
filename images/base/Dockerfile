@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo curl wget git vim nano \
     build-essential python3 python3-pip \
     nodejs npm jq unzip htop tmux \
-    ripgrep fd-find fzf zsh \
+    ripgrep fd-find fzf zsh cron \
   && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI
@@ -40,4 +40,4 @@ RUN echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin.sh
 RUN curl https://rclone.org/install.sh | bash
 
 EXPOSE 8000
-CMD ["sleep", "infinity"]
+CMD ["sh", "-c", "cron && sleep infinity"]
