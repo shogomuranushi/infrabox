@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
+
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -39,6 +41,20 @@ var sshCmd = &cobra.Command{
 		}
 		defer conn.Close()
 
+		// Mutex-protected write to prevent concurrent write panics.
+		// gorilla/websocket requires that only one goroutine writes at a time.
+		var writeMu sync.Mutex
+		writeMsg := func(msgType int, data []byte) error {
+			writeMu.Lock()
+			defer writeMu.Unlock()
+			return conn.WriteMessage(msgType, data)
+		}
+
+		// Override the default pong handler so it uses the shared mutex.
+		conn.SetPingHandler(func(appData string) error {
+			return writeMsg(websocket.PongMessage, []byte(appData))
+		})
+
 		// Put terminal in raw mode
 		oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 		if err != nil {
@@ -48,10 +64,10 @@ var sshCmd = &cobra.Command{
 		defer term.Restore(int(os.Stdin.Fd()), oldState)
 
 		// Send initial terminal size
-		sendTermSize(conn)
+		sendTermSize(writeMsg)
 
 		// Handle terminal resize (platform-specific)
-		watchResize(conn)
+		watchResize(writeMsg)
 
 		// Read from WebSocket → stdout
 		done := make(chan struct{})
@@ -72,11 +88,11 @@ var sshCmd = &cobra.Command{
 			for {
 				n, err := os.Stdin.Read(buf)
 				if err != nil {
-					conn.WriteMessage(websocket.CloseMessage,
+					writeMsg(websocket.CloseMessage,
 						websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 					return
 				}
-				if err := conn.WriteMessage(websocket.TextMessage, buf[:n]); err != nil {
+				if err := writeMsg(websocket.TextMessage, buf[:n]); err != nil {
 					return
 				}
 			}
@@ -105,7 +121,7 @@ func buildExecURL(name string) (string, error) {
 	return u.String(), nil
 }
 
-func sendTermSize(conn *websocket.Conn) {
+func sendTermSize(write func(int, []byte) error) {
 	w, h, err := term.GetSize(int(os.Stdin.Fd()))
 	if err != nil {
 		return
@@ -120,5 +136,5 @@ func sendTermSize(conn *websocket.Conn) {
 	msg := make([]byte, 1+len(data))
 	msg[0] = 0x04
 	copy(msg[1:], data)
-	conn.WriteMessage(websocket.BinaryMessage, msg)
+	write(websocket.BinaryMessage, msg) //nolint:errcheck
 }
