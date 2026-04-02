@@ -189,7 +189,7 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 		{
 			Name:            "fix-perms",
 			Image:           cfg.BaseImage,
-			ImagePullPolicy: corev1.PullIfNotPresent,
+			ImagePullPolicy: corev1.PullAlways,
 			Command: []string{"bash", "-c",
 				"chown ubuntu:ubuntu /home/ubuntu && chmod 750 /home/ubuntu",
 			},
@@ -226,7 +226,7 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 		initContainers = append(initContainers, corev1.Container{
 			Name:            "run-setup",
 			Image:           cfg.BaseImage,
-			ImagePullPolicy: corev1.PullIfNotPresent,
+			ImagePullPolicy: corev1.PullAlways,
 			Command: []string{"bash", "-c",
 				`if [ ! -f /home/ubuntu/.setup-done ]; then
   echo "Running setup script..."
@@ -263,7 +263,7 @@ fi`,
 						{
 							Name:            "vm",
 							Image:           cfg.BaseImage,
-							ImagePullPolicy: corev1.PullIfNotPresent,
+							ImagePullPolicy: corev1.PullAlways,
 							SecurityContext: &corev1.SecurityContext{
 								RunAsUser:  pointer.Int64(1000),
 								RunAsGroup: pointer.Int64(1000),
