@@ -40,4 +40,4 @@ RUN echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin.sh
 RUN curl https://rclone.org/install.sh | bash
 
 EXPOSE 8000
-CMD ["sh", "-c", "cron && sleep infinity"]
+CMD ["sh", "-c", "sudo cron && sleep infinity"]
