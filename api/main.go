@@ -84,6 +84,9 @@ func main() {
 		r.Get("/v1/resources", h.GetResources)
 		r.Get("/v1/admin/resources", h.GetAdminResources)
 
+		// Admin: list all VMs
+		r.Get("/v1/admin/vms", h.ListAdminVMs)
+
 		// Invitation codes (admin only)
 		r.Post("/v1/invitations", h.CreateInvitationCode)
 		r.Get("/v1/invitations", h.ListInvitationCodes)
