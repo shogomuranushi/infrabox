@@ -30,8 +30,8 @@ RUN (id ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu) \
   && usermod -s /bin/zsh ubuntu \
   && echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-# Claude Code (native installer, installed as ubuntu so auto-update works)
-RUN su -s /bin/bash ubuntu -c "curl -fsSL https://claude.ai/install.sh | bash"
+# Claude Code
+RUN npm install -g @anthropic-ai/claude-code
 
 # Make ~/.local/bin available in login shells for all users
 RUN echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin.sh
