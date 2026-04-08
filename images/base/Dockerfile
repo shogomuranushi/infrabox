@@ -39,5 +39,8 @@ RUN echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin.sh
 # rclone (Google Drive sync for context sharing)
 RUN curl https://rclone.org/install.sh | bash
 
+WORKDIR /home/ubuntu
+USER ubuntu
+
 EXPOSE 8000
 CMD ["sh", "-c", "sudo cron && sleep infinity"]
