@@ -12,6 +12,7 @@ import (
 type VMResponse struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	Owner       string `json:"owner"`
 	State       string `json:"state"`
 	AuthEnabled bool   `json:"auth_enabled"`
 	ExecURL     string `json:"exec_url"`

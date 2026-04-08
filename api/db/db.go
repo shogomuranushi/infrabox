@@ -192,16 +192,33 @@ func (d *DB) GetVM(name, owner string) (*VM, error) {
 	return vm, err
 }
 
-// ListVMs returns VMs for the given owner (empty owner = admin, returns all).
+// ListVMs returns VMs owned by the given owner (always filters by owner).
 func (d *DB) ListVMs(owner string) ([]*VM, error) {
-	query := `SELECT id, name, owner, namespace, state, auth_enabled, created_at, updated_at FROM vms WHERE state != 'deleted'`
-	args := []interface{}{}
-	if owner != "" {
-		query += ` AND owner = ?`
-		args = append(args, owner)
+	query := `SELECT id, name, owner, namespace, state, auth_enabled, created_at, updated_at FROM vms WHERE state != 'deleted' AND owner = ?`
+	rows, err := d.conn.Query(query, owner)
+	if err != nil {
+		return nil, err
 	}
-	query += ` ORDER BY created_at DESC`
-	rows, err := d.conn.Query(query, args...)
+	defer rows.Close()
+
+	var vms []*VM
+	for rows.Next() {
+		vm := &VM{}
+		var authEnabled int
+		if err := rows.Scan(&vm.ID, &vm.Name, &vm.Owner, &vm.Namespace, &vm.State, &authEnabled, &vm.CreatedAt, &vm.UpdatedAt); err != nil {
+			return nil, err
+		}
+		vm.AuthEnabled = authEnabled != 0
+		vms = append(vms, vm)
+	}
+	return vms, rows.Err()
+}
+
+// ListAllVMs returns all VMs regardless of owner (for admin use).
+func (d *DB) ListAllVMs() ([]*VM, error) {
+	rows, err := d.conn.Query(
+		`SELECT id, name, owner, namespace, state, auth_enabled, created_at, updated_at FROM vms WHERE state != 'deleted' ORDER BY created_at DESC`,
+	)
 	if err != nil {
 		return nil, err
 	}

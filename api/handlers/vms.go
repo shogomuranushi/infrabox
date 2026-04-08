@@ -31,6 +31,7 @@ func NewHandler(cfg *config.Config, database *db.DB, k8s *k8sclient.Client) *Han
 type VMResponse struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	Owner       string `json:"owner"`
 	State       string `json:"state"`
 	AuthEnabled bool   `json:"auth_enabled"`
 	ExecURL     string `json:"exec_url"`
@@ -167,6 +168,23 @@ func (h *Handler) ListVMs(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]interface{}{"vms": result})
 }
 
+func (h *Handler) ListAdminVMs(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		jsonError(w, "admin access required", http.StatusForbidden)
+		return
+	}
+	vms, err := h.db.ListAllVMs()
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	result := make([]VMResponse, 0, len(vms))
+	for _, vm := range vms {
+		result = append(result, h.toResponse(vm, h.ingressHost(vm.Name)))
+	}
+	jsonOK(w, map[string]interface{}{"vms": result})
+}
+
 func (h *Handler) GetVM(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	vm, err := h.db.GetVM(name, currentUser(r))
@@ -291,6 +309,7 @@ func (h *Handler) toResponse(vm *db.VM, ingressHost string) VMResponse {
 	return VMResponse{
 		ID:          vm.ID,
 		Name:        vm.Name,
+		Owner:       vm.Owner,
 		State:       vm.State,
 		AuthEnabled: vm.AuthEnabled,
 		ExecURL:     fmt.Sprintf("wss://%s/v1/vms/%s/exec", h.ingressAPIHost(), vm.Name),
