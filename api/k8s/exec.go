@@ -35,7 +35,7 @@ func (c *Client) ExecPod(ctx context.Context, namespace, name string, conn *webs
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "vm",
-			Command:   []string{"tmux", "new-session", "-A", "-s", "main"},
+			Command:   []string{"sh", "-c", "LANG=C.UTF-8 LC_ALL=C.UTF-8 exec tmux new-session -A -s main"},
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,

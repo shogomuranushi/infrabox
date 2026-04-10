@@ -39,6 +39,9 @@ RUN echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin.sh
 # rclone (Google Drive sync for context sharing)
 RUN curl https://rclone.org/install.sh | bash
 
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
 WORKDIR /home/ubuntu
 USER ubuntu
 
@@ -74,13 +77,13 @@ SHORT_HOST="$(_short_host)"
 # Prompt: user@shorthost ~/path (branch) %
 PROMPT='%F{cyan}%n@${SHORT_HOST}%f:%F{yellow}%~%f${vcs_info_msg_0_} %# '
 
-# Locale
+# Locale (already set via ENV, but explicit here for subshells)
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 EOF
 
 # tmux configuration
-RUN echo 'set -g mouse on' > ~/.tmux.conf
+RUN printf 'set -g mouse on\nset -g default-terminal "xterm-256color"\nset -ga terminal-overrides ",xterm-256color:Tc"\n' > ~/.tmux.conf
 
 EXPOSE 8000
 CMD ["sh", "-c", "sudo cron && sleep infinity"]
