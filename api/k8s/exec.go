@@ -22,7 +22,9 @@ const (
 )
 
 // ExecPod opens an interactive shell in the VM pod and bridges it to a WebSocket connection.
-func (c *Client) ExecPod(ctx context.Context, namespace, name string, conn *websocket.Conn) error {
+// session is the tmux session name to attach to (created if it does not exist).
+// The caller is responsible for validating the session name before passing it in.
+func (c *Client) ExecPod(ctx context.Context, namespace, name, session string, conn *websocket.Conn) error {
 	podName, err := c.findVMPod(ctx, namespace, name)
 	if err != nil {
 		return err
@@ -35,7 +37,11 @@ func (c *Client) ExecPod(ctx context.Context, namespace, name string, conn *webs
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "vm",
-			Command:   []string{"sh", "-c", "LANG=C.UTF-8 LC_ALL=C.UTF-8 exec tmux new-session -A -s main"},
+			Command: []string{
+				"sh", "-c",
+				`LANG=C.UTF-8 LC_ALL=C.UTF-8 exec tmux new-session -A -s "$1"`,
+				"--", session,
+			},
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
