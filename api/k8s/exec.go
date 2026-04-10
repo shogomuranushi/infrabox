@@ -237,10 +237,12 @@ func (ws *wsStream) sendClose(reason string) {
 }
 
 // Write sends data to the WebSocket (stdout/stderr to client).
+// BinaryMessage is used to avoid UTF-8 validation on multi-byte characters
+// (e.g. Japanese) that may be split across chunk boundaries.
 func (ws *wsStream) Write(p []byte) (int, error) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
-	if err := ws.conn.WriteMessage(websocket.TextMessage, p); err != nil {
+	if err := ws.conn.WriteMessage(websocket.BinaryMessage, p); err != nil {
 		return 0, err
 	}
 	return len(p), nil
