@@ -14,6 +14,8 @@ import (
 	"golang.org/x/term"
 )
 
+var sshSession string
+
 var sshCmd = &cobra.Command{
 	Use:   "ssh <name>",
 	Short: "Open a shell in a VM",
@@ -24,7 +26,7 @@ var sshCmd = &cobra.Command{
 		autoUploadFlag, _ := cmd.Flags().GetBool("auto-upload")
 		autoUpload := autoUploadFlag || cfg.AutoUploadPaste
 
-		wsURL, err := buildExecURL(name)
+		wsURL, err := buildExecURL(name, sshSession)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
@@ -128,11 +130,7 @@ var sshCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	sshCmd.Flags().Bool("auto-upload", false, "Auto-upload local file paths pasted into the session to the VM (requires confirmation per file)")
-}
-
-func buildExecURL(name string) (string, error) {
+func buildExecURL(name, session string) (string, error) {
 	u, err := url.Parse(cfg.Endpoint)
 	if err != nil {
 		return "", fmt.Errorf("invalid endpoint: %w", err)
@@ -148,7 +146,17 @@ func buildExecURL(name string) (string, error) {
 	}
 
 	u.Path = fmt.Sprintf("/v1/vms/%s/exec", name)
+	if session != "" {
+		q := u.Query()
+		q.Set("session", session)
+		u.RawQuery = q.Encode()
+	}
 	return u.String(), nil
+}
+
+func init() {
+	sshCmd.Flags().StringVarP(&sshSession, "session", "s", "main", "tmux session name to attach to (created if it does not exist)")
+	sshCmd.Flags().Bool("auto-upload", false, "Auto-upload local file paths pasted into the session to the VM (requires confirmation per file)")
 }
 
 func sendTermSize(write func(int, []byte) error) {
