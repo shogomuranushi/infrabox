@@ -14,9 +14,10 @@ var defaultEndpoint string
 var Version = "dev"
 
 type Config struct {
-	Endpoint string `yaml:"endpoint"`
-	APIKey   string `yaml:"api_key"`
-	AdminKey string `yaml:"admin_key,omitempty"`
+	Endpoint        string `yaml:"endpoint"`
+	APIKey          string `yaml:"api_key"`
+	AdminKey        string `yaml:"admin_key,omitempty"`
+	AutoUploadPaste bool   `yaml:"auto_upload_paste,omitempty"`
 }
 
 var cfg Config
