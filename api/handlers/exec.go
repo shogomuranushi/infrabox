@@ -13,8 +13,10 @@ import (
 
 // tmuxSessionNameRE restricts session names to a safe character set so they
 // can be passed as a literal argument to tmux without risk of shell escaping
-// issues. tmux itself forbids '.' and ':' in session names.
-var tmuxSessionNameRE = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+// issues. tmux itself forbids '.' and ':' in session names. Leading '-' is
+// disallowed to avoid the value being mistaken for an option flag by tmux
+// commands the user may run later inside the shell.
+var tmuxSessionNameRE = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$`)
 
 var upgrader = websocket.Upgrader{
 	// CheckOrigin allows all origins because CLI clients don't send Origin headers.
@@ -47,7 +49,7 @@ func (h *Handler) ExecVM(w http.ResponseWriter, r *http.Request) {
 		session = "main"
 	}
 	if !tmuxSessionNameRE.MatchString(session) {
-		jsonError(w, "invalid session name: must match [a-zA-Z0-9_-]{1,64}", http.StatusBadRequest)
+		jsonError(w, "invalid session name: must be 1-64 chars of [a-zA-Z0-9_-] and not start with '-'", http.StatusBadRequest)
 		return
 	}
 
