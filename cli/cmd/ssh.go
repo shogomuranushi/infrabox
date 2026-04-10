@@ -21,6 +21,8 @@ var sshCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		mustConfig()
 		name := args[0]
+		autoUploadFlag, _ := cmd.Flags().GetBool("auto-upload")
+		autoUpload := autoUploadFlag || cfg.AutoUploadPaste
 
 		wsURL, err := buildExecURL(name)
 		if err != nil {
@@ -82,6 +84,21 @@ var sshCmd = &cobra.Command{
 			}
 		}()
 
+		// Stdin forwarder. If auto-upload is enabled, pipe stdin through the
+		// paste interceptor; otherwise forward raw chunks unchanged.
+		forwardToVM := func(chunk []byte) error {
+			return writeMsg(websocket.BinaryMessage, chunk)
+		}
+		logf := func(format string, a ...interface{}) {
+			// Go to column 0, print, then resume wherever the TUI was.
+			fmt.Fprintf(os.Stderr, "\r\x1b[K"+format+"\r\n", a...)
+		}
+		var interceptor *pasteInterceptor
+		if autoUpload {
+			interceptor = newPasteInterceptor(name, forwardToVM, logf)
+			fmt.Fprint(os.Stderr, "\r\x1b[33m[ib]\x1b[0m auto-upload-paste enabled — pasted local file paths will be confirmed & uploaded to the VM.\r\n")
+		}
+
 		// Read from stdin → WebSocket
 		go func() {
 			buf := make([]byte, 4096)
@@ -92,14 +109,27 @@ var sshCmd = &cobra.Command{
 						websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 					return
 				}
-				if err := writeMsg(websocket.BinaryMessage, buf[:n]); err != nil {
-					return
+				if interceptor != nil {
+					if ferr := interceptor.Feed(buf[:n]); ferr != nil {
+						return
+					}
+				} else {
+					if err := writeMsg(websocket.BinaryMessage, buf[:n]); err != nil {
+						return
+					}
 				}
 			}
 		}()
 
 		<-done
+		if interceptor != nil {
+			interceptor.Close()
+		}
 	},
+}
+
+func init() {
+	sshCmd.Flags().Bool("auto-upload", false, "Auto-upload local file paths pasted into the session to the VM (requires confirmation per file)")
 }
 
 func buildExecURL(name string) (string, error) {
