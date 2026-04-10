@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,10 +24,49 @@ type Handler struct {
 	cfg *config.Config
 	db  *db.DB
 	k8s *k8sclient.Client
+
+	// tunnelCounts tracks concurrent tunnel sessions keyed by
+	// "user:<name>" (per-user cap) and "vm:<ns>/<name>" (per-VM cap).
+	tunnelCounts sync.Map
 }
 
 func NewHandler(cfg *config.Config, database *db.DB, k8s *k8sclient.Client) *Handler {
 	return &Handler{cfg: cfg, db: database, k8s: k8s}
+}
+
+// Per-user/per-VM concurrent tunnel limits.
+const (
+	maxTunnelsPerUser = 5
+	maxTunnelsPerVM   = 3
+)
+
+// tryAcquireTunnelSlot atomically checks both the per-user and per-VM counters
+// and increments both if capacity is available. Returns a release function that
+// must be called exactly once when the tunnel closes.
+func (h *Handler) tryAcquireTunnelSlot(user, namespace, vmName string) (release func(), ok bool) {
+	userKey := "user:" + user
+	vmKey := "vm:" + namespace + "/" + vmName
+
+	userCnt, _ := h.tunnelCounts.LoadOrStore(userKey, new(atomic.Int32))
+	vmCnt, _ := h.tunnelCounts.LoadOrStore(vmKey, new(atomic.Int32))
+	uc := userCnt.(*atomic.Int32)
+	vc := vmCnt.(*atomic.Int32)
+
+	// Increment user; roll back if it exceeds the cap.
+	if uc.Add(1) > maxTunnelsPerUser {
+		uc.Add(-1)
+		return nil, false
+	}
+	// Increment VM; roll back both if it exceeds the cap.
+	if vc.Add(1) > maxTunnelsPerVM {
+		vc.Add(-1)
+		uc.Add(-1)
+		return nil, false
+	}
+	return func() {
+		vc.Add(-1)
+		uc.Add(-1)
+	}, true
 }
 
 type VMResponse struct {

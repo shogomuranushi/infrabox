@@ -1,0 +1,60 @@
+# Default-deny NetworkPolicy for infrabox-vms-* user namespaces.
+#
+# Apply this to every per-user namespace alongside the ResourceQuota.
+# Wire it in via EnsureUserNamespace in api/k8s/vm.go.
+#
+# Assumptions verified from the codebase:
+#   - VM pods listen on port 8000 (containerPort in createDeployment)
+#   - Ingress-nginx runs in the "ingress-nginx" namespace with the label
+#     "app.kubernetes.io/name: ingress-nginx" (standard Helm chart convention)
+#   - The InfraBox API runs in the "infrabox" namespace (GKE_DEPLOY_NAMESPACE
+#     default in deploy-api.yml)
+#   - kubectl exec traffic flows: CLI -> k8s API server -> kubelet -> pod.
+#     It does NOT traverse the pod network, so no NetworkPolicy rule is needed
+#     to allow it.
+#   - All egress is permitted (users need unrestricted internet access).
+#
+# Note: this is a namespace-scoped resource; it must be applied (or created
+# programmatically) in each infrabox-vms-<user> namespace.  The name is stable
+# so Create + AlreadyExists is idempotent, matching the ResourceQuota pattern.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vm-default-deny
+  # Namespace is set at apply-time or via the Go client (see vm.go).
+  labels:
+    managed-by: infrabox
+spec:
+  # Target every pod in this namespace.
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # Allow ingress-nginx -> VM pods on port 8000 only.
+    # The standard ingress-nginx Helm chart labels its pods with
+    # app.kubernetes.io/name=ingress-nginx in the ingress-nginx namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+
+    # Intra-namespace traffic: allow VM pods to talk to each other if needed
+    # (e.g. multi-container workflows within one user's namespace).
+    # Remove this rule if you want strict per-pod isolation within a namespace.
+    - from:
+        - podSelector: {}
+
+  egress:
+    # Allow all egress: users must be able to reach the internet, the k8s API
+    # server, DNS, etc.  Restricting egress here would break most user
+    # workloads without meaningful security gain (users already have a shell).
+    - {}

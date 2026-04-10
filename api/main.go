@@ -57,6 +57,8 @@ func main() {
 
 	// Rate limiter for key creation: 5 requests/minute per IP, burst of 3
 	keyRL := handlers.NewKeyRateLimiter()
+	// Rate limiter for tunnel establishment: 10 req/min per IP, burst of 5
+	tunnelRL := handlers.NewTunnelRateLimiter()
 
 	r.Get("/healthz", h.HealthZ)
 	r.With(keyRL.Middleware).Post("/v1/keys", h.CreateKey)
@@ -72,6 +74,7 @@ func main() {
 		r.Post("/v1/vms/{name}/restart", h.RestartVM)
 		r.Patch("/v1/vms/{name}/auth", h.UpdateVMAuth)
 		r.Get("/v1/vms/{name}/exec", h.ExecVM)
+		r.With(tunnelRL.Middleware).Get("/v1/vms/{name}/tunnel", h.TunnelVM)
 		r.Post("/v1/vms/{name}/files", h.UploadFile)
 		r.Get("/v1/vms/{name}/files", h.DownloadFile)
 

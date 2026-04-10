@@ -6,6 +6,7 @@ require (
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/hashicorp/yamux v0.1.2
 	golang.org/x/time v0.7.0
 	k8s.io/api v0.32.1
 	k8s.io/apimachinery v0.32.1

@@ -64,6 +64,11 @@ func NewKeyRateLimiter() *RateLimiter {
 	return NewRateLimiter(rate.Limit(5.0/60.0), 3)
 }
 
+// NewTunnelRateLimiter returns a rate limiter tuned for tunnel establishment (10 req/min, burst 5).
+func NewTunnelRateLimiter() *RateLimiter {
+	return NewRateLimiter(rate.Limit(10.0/60.0), 5)
+}
+
 // Middleware returns an HTTP middleware that rate-limits by client IP.
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

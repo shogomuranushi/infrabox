@@ -46,7 +46,8 @@ func UserNamespace(baseNamespace, owner string) string {
 	return baseNamespace + "-" + sanitizeOwner(owner)
 }
 
-// EnsureUserNamespace creates the per-user namespace and ResourceQuota if they don't exist.
+// EnsureUserNamespace creates the per-user namespace, ResourceQuota, and
+// default-deny NetworkPolicy if they don't exist.
 func (c *Client) EnsureUserNamespace(ctx context.Context, namespace, cpuQuota, memoryQuota string) error {
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -84,6 +85,91 @@ func (c *Client) EnsureUserNamespace(ctx context.Context, namespace, cpuQuota, m
 		_, err = c.Clientset.CoreV1().ResourceQuotas(namespace).Update(ctx, quota, metav1.UpdateOptions{})
 		if err != nil {
 			return fmt.Errorf("update resource quota in %s: %w", namespace, err)
+		}
+	}
+
+	if err := c.ensureVMNetworkPolicy(ctx, namespace); err != nil {
+		return fmt.Errorf("ensure network policy in %s: %w", namespace, err)
+	}
+	return nil
+}
+
+// ensureVMNetworkPolicy applies a default-deny NetworkPolicy to the given
+// namespace that:
+//   - Denies all ingress not explicitly permitted.
+//   - Allows ingress-nginx pods (namespace: ingress-nginx) to reach VM pods on
+//     port 8000.
+//   - Allows intra-namespace traffic between VM pods.
+//   - Allows all egress (users need unrestricted internet access).
+//
+// Note: kubectl exec traffic flows through the Kubernetes API server and
+// kubelet, NOT over the pod network, so no ingress rule is needed for exec.
+func (c *Client) ensureVMNetworkPolicy(ctx context.Context, namespace string) error {
+	ingressNginxNS := "ingress-nginx"
+	port8000 := intstr.FromInt(8000)
+	tcpProto := corev1.ProtocolTCP
+
+	pol := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "vm-default-deny",
+			Namespace: namespace,
+			Labels: map[string]string{
+				"managed-by": "infrabox",
+			},
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			// Target every pod in this namespace.
+			PodSelector: metav1.LabelSelector{},
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+				networkingv1.PolicyTypeEgress,
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				// Allow ingress-nginx -> VM pods on port 8000 only.
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": ingressNginxNS,
+								},
+							},
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app.kubernetes.io/name": "ingress-nginx",
+								},
+							},
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{Protocol: &tcpProto, Port: &port8000},
+					},
+				},
+				// Allow intra-namespace traffic (pods within the same user's namespace).
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{PodSelector: &metav1.LabelSelector{}},
+					},
+				},
+			},
+			// Allow all egress.
+			Egress: []networkingv1.NetworkPolicyEgressRule{{}},
+		},
+	}
+
+	_, err := c.Clientset.NetworkingV1().NetworkPolicies(namespace).Create(ctx, pol, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return err
+	}
+	if errors.IsAlreadyExists(err) {
+		existing, getErr := c.Clientset.NetworkingV1().NetworkPolicies(namespace).Get(ctx, pol.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return getErr
+		}
+		pol.ResourceVersion = existing.ResourceVersion
+		_, err = c.Clientset.NetworkingV1().NetworkPolicies(namespace).Update(ctx, pol, metav1.UpdateOptions{})
+		if err != nil {
+			return err
 		}
 	}
 	return nil
