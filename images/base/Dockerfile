@@ -42,5 +42,10 @@ RUN curl https://rclone.org/install.sh | bash
 WORKDIR /home/ubuntu
 USER ubuntu
 
+# Zsh history settings (required for command recall with arrow keys)
+RUN echo 'HISTFILE=~/.zsh_history' >> ~/.zshrc \
+  && echo 'HISTSIZE=10000' >> ~/.zshrc \
+  && echo 'SAVEHIST=10000' >> ~/.zshrc
+
 EXPOSE 8000
 CMD ["sh", "-c", "sudo cron && sleep infinity"]
