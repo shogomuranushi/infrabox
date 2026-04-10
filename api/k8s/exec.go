@@ -35,7 +35,7 @@ func (c *Client) ExecPod(ctx context.Context, namespace, name string, conn *webs
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "vm",
-			Command:   []string{"/bin/bash", "-l"},
+			Command:   []string{"/bin/zsh", "-l"},
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
