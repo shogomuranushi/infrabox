@@ -73,7 +73,14 @@ SHORT_HOST="$(_short_host)"
 
 # Prompt: user@shorthost ~/path (branch) %
 PROMPT='%F{cyan}%n@${SHORT_HOST}%f:%F{yellow}%~%f${vcs_info_msg_0_} %# '
+
+# Locale
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
 EOF
+
+# tmux configuration
+RUN echo 'set -g mouse on' > ~/.tmux.conf
 
 EXPOSE 8000
 CMD ["sh", "-c", "sudo cron && sleep infinity"]
