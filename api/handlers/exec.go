@@ -4,11 +4,17 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
+
+// tmuxSessionNameRE restricts session names to a safe character set so they
+// can be passed as a literal argument to tmux without risk of shell escaping
+// issues. tmux itself forbids '.' and ':' in session names.
+var tmuxSessionNameRE = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 var upgrader = websocket.Upgrader{
 	// CheckOrigin allows all origins because CLI clients don't send Origin headers.
@@ -36,6 +42,15 @@ func (h *Handler) ExecVM(w http.ResponseWriter, r *http.Request) {
 		vmNamespace = h.cfg.VMNamespace
 	}
 
+	session := r.URL.Query().Get("session")
+	if session == "" {
+		session = "main"
+	}
+	if !tmuxSessionNameRE.MatchString(session) {
+		jsonError(w, "invalid session name: must match [a-zA-Z0-9_-]{1,64}", http.StatusBadRequest)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ERROR: websocket upgrade for %s: %v", name, err)
@@ -43,7 +58,7 @@ func (h *Handler) ExecVM(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	if err := h.k8s.ExecPod(r.Context(), vmNamespace, name, conn); err != nil {
+	if err := h.k8s.ExecPod(r.Context(), vmNamespace, name, session, conn); err != nil {
 		log.Printf("ERROR: exec for %s: %v", name, err)
 		conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "session ended"))
