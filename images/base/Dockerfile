@@ -1,3 +1,17 @@
+# syntax=docker/dockerfile:1
+
+# ---- Stage 1: build infrabox-agent ----
+# Builds the reverse-tunnel endpoint that runs inside the VM pod.
+# Sources live in the repository's agent/ directory; the build context
+# must be the repository root so the COPY below can see them.
+FROM golang:1.23-bookworm AS agent-build
+WORKDIR /src
+COPY agent/go.mod agent/go.sum* ./
+RUN go mod download
+COPY agent/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/infrabox-agent .
+
+# ---- Stage 2: runtime image ----
 FROM ubuntu:24.04
 LABEL org.opencontainers.image.source=https://github.com/shogomuranushi/infrabox
 
@@ -7,6 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs npm jq unzip htop tmux \
     ripgrep fd-find fzf zsh cron \
   && rm -rf /var/lib/apt/lists/*
+
+# Reverse tunnel endpoint (see agent/ in the repository).
+COPY --from=agent-build /out/infrabox-agent /usr/local/bin/infrabox-agent
 
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \

@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "images/base/**"
+      - "agent/**"
   workflow_dispatch:
 
 env:
@@ -31,7 +32,8 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: images/base
+          context: .
+          file: images/base/Dockerfile
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ubuntu-24.04

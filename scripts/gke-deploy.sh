@@ -44,8 +44,10 @@ deploy_api() {
 
 deploy_base() {
   log "Building and pushing base image"
+  # Build context is the repository root so the multi-stage Dockerfile can
+  # access agent/ sources for the infrabox-agent builder stage.
   docker build -t "ghcr.io/${GHCR_USER}/infrabox-base:ubuntu-24.04" \
-    -f "$REPO_ROOT/images/base/Dockerfile" "$REPO_ROOT/images/base/"
+    -f "$REPO_ROOT/images/base/Dockerfile" "$REPO_ROOT"
   docker push "ghcr.io/${GHCR_USER}/infrabox-base:ubuntu-24.04"
   ok "Base image pushed to ghcr.io"
   echo "  Note: existing VMs will pull the new image on next restart."
