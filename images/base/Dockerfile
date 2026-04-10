@@ -42,10 +42,38 @@ RUN curl https://rclone.org/install.sh | bash
 WORKDIR /home/ubuntu
 USER ubuntu
 
-# Zsh history settings (required for command recall with arrow keys)
-RUN echo 'HISTFILE=~/.zsh_history' >> ~/.zshrc \
-  && echo 'HISTSIZE=10000' >> ~/.zshrc \
-  && echo 'SAVEHIST=10000' >> ~/.zshrc
+# Zsh configuration
+RUN cat >> ~/.zshrc <<'EOF'
+
+# History
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt SHARE_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_SPACE
+
+# Completion
+autoload -Uz compinit && compinit
+
+# Git branch in prompt
+autoload -Uz vcs_info
+precmd_vcs_info() { vcs_info }
+precmd_functions+=( precmd_vcs_info )
+zstyle ':vcs_info:*' enable git
+zstyle ':vcs_info:git:*' formats ' %F{magenta}(%b)%f'
+setopt PROMPT_SUBST
+
+# Shorten k8s pod hostname (remove trailing hash/random suffix)
+_short_host() {
+  local h="${HOST}"
+  # Remove last two dash-separated segments (k8s pod suffix like -789d6d5dd4-xxwlx)
+  local s="${h%-*-*}"
+  echo "${s:-$h}"
+}
+SHORT_HOST="$(_short_host)"
+
+# Prompt: user@shorthost ~/path (branch) %
+PROMPT='%F{cyan}%n@${SHORT_HOST}%f:%F{yellow}%~%f${vcs_info_msg_0_} %# '
+EOF
 
 EXPOSE 8000
 CMD ["sh", "-c", "sudo cron && sleep infinity"]
