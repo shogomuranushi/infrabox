@@ -92,7 +92,7 @@ var sshCmd = &cobra.Command{
 						websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 					return
 				}
-				if err := writeMsg(websocket.TextMessage, buf[:n]); err != nil {
+				if err := writeMsg(websocket.BinaryMessage, buf[:n]); err != nil {
 					return
 				}
 			}
