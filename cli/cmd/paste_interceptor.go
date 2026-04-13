@@ -20,8 +20,10 @@ import (
 //   - Detection restricted to bracketed paste regions (never raw keystrokes)
 //   - Symlinks are rejected
 //   - Dotfile and sensitive-directory blocklist
-//   - Extension allowlist
+//   - Extension allowlist (see allowedAutoUploadExts)
 //   - Size limit (20 MiB default)
+//   - Files outside $HOME are permitted; the blocklist and extension
+//     allowlist are the primary safeguards for arbitrary paths.
 //   - All auto-uploads recorded to ~/.ib/auto-upload.log
 //   - On any parser/upload failure we fail open (pass-through) rather than
 //     deadlock the ssh session.
@@ -243,8 +245,8 @@ func (p *pasteInterceptor) finishPaste() error {
 		if err != nil {
 			continue
 		}
-		// Fail open: upload errors do not block the paste forwarding.
-		p.doUpload(abs, info.Size()) //nolint:errcheck
+		// Upload failure is non-fatal: the paste is forwarded regardless (fail-open design).
+		_ = p.doUpload(abs, info.Size())
 	}
 
 	// Flush the paste (markers + original body) to the WebSocket verbatim.
