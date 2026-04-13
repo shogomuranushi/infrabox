@@ -91,14 +91,9 @@ var sshCmd = &cobra.Command{
 		forwardToVM := func(chunk []byte) error {
 			return writeMsg(websocket.BinaryMessage, chunk)
 		}
-		logf := func(format string, a ...interface{}) {
-			// Go to column 0, print, then resume wherever the TUI was.
-			fmt.Fprintf(os.Stderr, "\r\x1b[K"+format+"\r\n", a...)
-		}
 		var interceptor *pasteInterceptor
 		if autoUpload {
-			interceptor = newPasteInterceptor(name, forwardToVM, logf)
-			fmt.Fprint(os.Stderr, "\r\x1b[33m[ib]\x1b[0m auto-upload-paste enabled — pasted local file paths will be confirmed & uploaded to the VM.\r\n")
+			interceptor = newPasteInterceptor(name, forwardToVM)
 		}
 
 		// Read from stdin → WebSocket
@@ -156,7 +151,7 @@ func buildExecURL(name, session string) (string, error) {
 
 func init() {
 	sshCmd.Flags().StringVarP(&sshSession, "session", "s", "main", "tmux session name to attach to (created if it does not exist)")
-	sshCmd.Flags().Bool("auto-upload", false, "Auto-upload local file paths pasted into the session to the VM (requires confirmation per file)")
+	sshCmd.Flags().Bool("auto-upload", false, "Auto-upload local file paths pasted into the session to the VM")
 }
 
 func sendTermSize(write func(int, []byte) error) {

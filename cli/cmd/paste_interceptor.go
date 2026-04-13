@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -16,14 +15,13 @@ import (
 // paths inside them, and auto-uploads those files to the VM at the same path
 // before releasing the paste content to the WebSocket.
 //
-// Security design (see SECURITY NOTES below):
-//   - Opt-in only (--auto-upload or config.auto_upload_paste)
+// Security design:
+//   - Opt-in only (--auto-upload flag)
 //   - Detection restricted to bracketed paste regions (never raw keystrokes)
-//   - Source files must live under $HOME; symlinks are rejected
+//   - Symlinks are rejected
 //   - Dotfile and sensitive-directory blocklist
 //   - Extension allowlist
 //   - Size limit (20 MiB default)
-//   - Consent prompt per unique path, session-scoped
 //   - All auto-uploads recorded to ~/.ib/auto-upload.log
 //   - On any parser/upload failure we fail open (pass-through) rather than
 //     deadlock the ssh session.
@@ -108,14 +106,9 @@ type uploader func(vmName, destPath, localPath string, recursive bool) error
 // read from stdin; it will invoke write() with chunks to forward to the
 // WebSocket, possibly delayed while a paste is being processed.
 type pasteInterceptor struct {
-	vmName   string
-	upload   uploader
-	write    func([]byte) error
-	logf     func(format string, a ...interface{})
-	promptMu sync.Mutex // serializes confirmation prompts
-
-	// session-scoped "always" allow list for paths the user has opted in
-	allowed map[string]bool
+	vmName string
+	upload uploader
+	write  func([]byte) error
 
 	// bracketed paste state
 	inPaste bool
@@ -123,13 +116,11 @@ type pasteInterceptor struct {
 	carry   bytes.Buffer // holds trailing bytes that might start a marker
 }
 
-func newPasteInterceptor(vmName string, write func([]byte) error, logf func(string, ...interface{})) *pasteInterceptor {
+func newPasteInterceptor(vmName string, write func([]byte) error) *pasteInterceptor {
 	return &pasteInterceptor{
-		vmName:  vmName,
-		upload:  uploadToVM,
-		write:   write,
-		logf:    logf,
-		allowed: map[string]bool{},
+		vmName: vmName,
+		upload: uploadToVM,
+		write:  write,
 	}
 }
 
@@ -232,7 +223,6 @@ func (p *pasteInterceptor) Close() error {
 // abortPaste is called when a paste body exceeds pasteMaxBufBytes. We flush
 // what we have verbatim and return to normal pass-through mode.
 func (p *pasteInterceptor) abortPaste() error {
-	p.logf("auto-upload: paste body exceeded inspection cap, passing through without scanning")
 	err := p.write(p.buf.Bytes())
 	p.buf.Reset()
 	p.inPaste = false
@@ -251,23 +241,10 @@ func (p *pasteInterceptor) finishPaste() error {
 	for _, raw := range paths {
 		abs, info, err := validateSourcePath(raw)
 		if err != nil {
-			// Not eligible — silently skip (log at debug level).
 			continue
 		}
-		if p.allowed[abs] {
-			// Previously confirmed in this session.
-		} else {
-			ok := p.confirm(abs, info.Size())
-			if !ok {
-				p.logf("auto-upload: skipped %s", abs)
-				continue
-			}
-			p.allowed[abs] = true
-		}
-		if err := p.doUpload(abs, info.Size()); err != nil {
-			p.logf("auto-upload: FAILED for %s: %v", abs, err)
-			// Fail open: still forward the paste so the user's workflow is not blocked.
-		}
+		// Fail open: upload errors do not block the paste forwarding.
+		p.doUpload(abs, info.Size()) //nolint:errcheck
 	}
 
 	// Flush the paste (markers + original body) to the WebSocket verbatim.
@@ -281,51 +258,12 @@ func (p *pasteInterceptor) finishPaste() error {
 // doUpload performs the actual transfer and writes an audit record.
 func (p *pasteInterceptor) doUpload(absPath string, size int64) error {
 	destDir := filepath.Dir(absPath) + "/"
-	p.logf("auto-upload: uploading %s (%s) → %s:%s", absPath, humanSize(size), p.vmName, absPath)
-	start := time.Now()
 	if err := p.upload(p.vmName, destDir, absPath, false); err != nil {
 		writeAuditLog(p.vmName, absPath, size, false, err.Error())
 		return err
 	}
 	writeAuditLog(p.vmName, absPath, size, true, "")
-	p.logf("auto-upload: done %s (%s in %s)", filepath.Base(absPath), humanSize(size), time.Since(start).Round(time.Millisecond))
 	return nil
-}
-
-// confirm asks the user for permission to upload a specific path. It prints
-// directly to /dev/tty so its output is not routed to the WebSocket and is
-// visible even while the terminal is in raw mode. It reads a single byte
-// (the terminal is already in raw mode, set by ssh.go). Only 'y' or 'Y'
-// counts as consent; anything else is refused.
-func (p *pasteInterceptor) confirm(absPath string, size int64) bool {
-	p.promptMu.Lock()
-	defer p.promptMu.Unlock()
-
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		// Without a controllable tty we cannot get informed consent; refuse.
-		p.logf("auto-upload: cannot open /dev/tty for confirmation, refusing upload of %s", absPath)
-		return false
-	}
-	defer tty.Close()
-
-	fmt.Fprintf(tty, "\r\n\x1b[33m[ib auto-upload]\x1b[0m %s (%s) → %s:%s\r\n", absPath, humanSize(size), p.vmName, absPath)
-	fmt.Fprintf(tty, "Upload to VM? [y/N] ")
-
-	// Single-byte read; terminal is in raw mode so no echo, no buffering.
-	one := make([]byte, 1)
-	n, _ := tty.Read(one)
-	var ans byte
-	if n == 1 {
-		ans = one[0]
-	}
-	// Echo the answer (or a dash) so the user sees what was registered.
-	if ans == 'y' || ans == 'Y' {
-		fmt.Fprint(tty, "y\r\n")
-		return true
-	}
-	fmt.Fprint(tty, "n\r\n")
-	return false
 }
 
 // --- helpers ---
@@ -481,26 +419,6 @@ func validateSourcePath(raw string) (string, os.FileInfo, error) {
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return "", nil, err
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", nil, err
-	}
-	homeAbs, err := filepath.EvalSymlinks(home)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// Both the originally-requested path AND its symlink-resolved form must
-	// live inside $HOME. This blocks symlink-escape attacks while still
-	// allowing intermediate symlinks that stay within the user's home
-	// (e.g. ~/Pictures → ~/Dropbox/Pictures).
-	for _, p := range []string{abs, resolved} {
-		rel, err := filepath.Rel(homeAbs, p)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", nil, fmt.Errorf("outside home directory")
-		}
 	}
 
 	// Blocklist: segment match anywhere in EITHER the original path or the

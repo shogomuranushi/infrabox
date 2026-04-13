@@ -34,7 +34,7 @@ func checkUpdateBackground() {
 		saveCheckTime()
 		if isNewer(latest, Version) {
 			fmt.Fprintf(os.Stderr, "\n[ib] New version available: %s → %s\n", Version, latest)
-			fmt.Fprintln(os.Stderr, "[ib] Run 'ib upgrade' to update.\n")
+			fmt.Fprintln(os.Stderr, "[ib] Run 'ib upgrade' to update.")
 		}
 	}()
 }

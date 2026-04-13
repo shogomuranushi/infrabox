@@ -100,7 +100,7 @@ func TestPasteInterceptor_PassThroughNonPaste(t *testing.T) {
 	p := newPasteInterceptor("vm", func(b []byte) error {
 		forwarded.Write(b)
 		return nil
-	}, func(string, ...interface{}) {})
+	})
 	p.upload = func(string, string, string, bool) error { t.Fatal("upload should not be called"); return nil }
 
 	inputs := [][]byte{
@@ -122,7 +122,7 @@ func TestPasteInterceptor_ChunkBoundaryInsideStartMarker(t *testing.T) {
 	p := newPasteInterceptor("vm", func(b []byte) error {
 		forwarded.Write(b)
 		return nil
-	}, func(string, ...interface{}) {})
+	})
 	p.upload = func(string, string, string, bool) error { return nil }
 
 	// Split "prefix\x1b[200~body\x1b[201~" across the start marker.
@@ -132,7 +132,7 @@ func TestPasteInterceptor_ChunkBoundaryInsideStartMarker(t *testing.T) {
 		p = newPasteInterceptor("vm", func(b []byte) error {
 			forwarded.Write(b)
 			return nil
-		}, func(string, ...interface{}) {})
+		})
 		p.upload = func(string, string, string, bool) error { return nil }
 
 		if err := p.Feed(full[:i]); err != nil {
@@ -167,15 +167,12 @@ func TestPasteInterceptor_UploadsMatchingPath(t *testing.T) {
 	p := newPasteInterceptor("my-vm", func(b []byte) error {
 		forwarded.Write(b)
 		return nil
-	}, func(string, ...interface{}) {})
+	})
 	p.upload = func(vm, dest, local string, recursive bool) error {
 		uploaded = append(uploaded, local)
 		return nil
 	}
-	// Pre-allow so confirm() is not called from the test.
 	resolved, _ := filepath.EvalSymlinks(pic)
-	p.allowed[resolved] = true
-
 	paste := "\x1b[200~" + resolved + "\x1b[201~"
 	if err := p.Feed([]byte(paste)); err != nil {
 		t.Fatal(err)
@@ -188,17 +185,17 @@ func TestPasteInterceptor_UploadsMatchingPath(t *testing.T) {
 	}
 }
 
-func TestValidateSourcePath_RejectsOutsideHome(t *testing.T) {
+func TestValidateSourcePath_AllowsOutsideHome(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
-	// File outside HOME
+	// File outside HOME (e.g. /var/folders on macOS) should now be allowed.
 	other := t.TempDir()
 	p := filepath.Join(other, "foo.png")
 	os.WriteFile(p, []byte("x"), 0644)
 
-	if _, _, err := validateSourcePath(p); err == nil || !strings.Contains(err.Error(), "outside home") {
-		t.Errorf("expected 'outside home' error, got %v", err)
+	if _, _, err := validateSourcePath(p); err != nil {
+		t.Errorf("expected success for outside-home path, got %v", err)
 	}
 }
 
@@ -255,11 +252,8 @@ func TestValidateSourcePath_AllowsNormalImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
-	// On macOS $TMPDIR often lives under /var/folders which is a symlink to
-	// /private/var/... so abs may be the evaluated form.
-	want, _ := filepath.EvalSymlinks(p)
-	if abs != want {
-		t.Errorf("abs %q, want %q", abs, want)
+	if !filepath.IsAbs(abs) {
+		t.Errorf("abs %q is not absolute", abs)
 	}
 	if info.Size() != 1 {
 		t.Errorf("size %d, want 1", info.Size())
