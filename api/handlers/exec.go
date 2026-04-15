@@ -148,6 +148,46 @@ func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 // using the Kubernetes resize protocol (channel 4).
 // No separate endpoint needed — resize messages are sent inline.
 
+// ExecCommandVM handles WebSocket-based execution of a specific command in a VM pod.
+// Unlike ExecVM (which runs tmux), this runs the given command directly.
+// GET /v1/vms/{name}/exec-command?cmd=<shell-command>
+func (h *Handler) ExecCommandVM(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	vm, err := h.db.GetVM(name, currentUser(r))
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if vm == nil {
+		jsonError(w, "VM not found", http.StatusNotFound)
+		return
+	}
+
+	command := r.URL.Query().Get("cmd")
+	if strings.TrimSpace(command) == "" {
+		jsonError(w, "cmd query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	vmNamespace := vm.Namespace
+	if vmNamespace == "" {
+		vmNamespace = h.cfg.VMNamespace
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ERROR: websocket upgrade for exec-command %s: %v", name, err)
+		return
+	}
+	defer conn.Close()
+
+	if err := h.k8s.ExecCommand(r.Context(), vmNamespace, name, command, conn); err != nil {
+		log.Printf("ERROR: exec-command for %s: %v", name, err)
+		conn.WriteMessage(websocket.CloseMessage, //nolint:errcheck
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "command ended"))
+	}
+}
+
 // RunCommand executes a shell command in a VM pod and returns its output.
 // POST /v1/vms/{name}/run
 // Request body: {"command": "..."}

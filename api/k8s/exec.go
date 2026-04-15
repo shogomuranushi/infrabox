@@ -160,6 +160,45 @@ func (c *Client) CopyFromPod(ctx context.Context, namespace, name, srcPath strin
 	})
 }
 
+// ExecCommand runs a shell command in the VM pod and bridges its stdin/stdout/stderr
+// to a WebSocket connection. Unlike ExecPod (which runs tmux), this runs the command
+// directly — intended for long-running proxy processes like the Claude Code remote server.
+func (c *Client) ExecCommand(ctx context.Context, namespace, name, command string, conn *websocket.Conn) error {
+	podName, err := c.findVMPod(ctx, namespace, name)
+	if err != nil {
+		return err
+	}
+
+	req := c.Clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: "vm",
+			Command:   []string{"bash", "-c", command},
+			Stdin:     true,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	executor, err := remotecommand.NewSPDYExecutor(c.RestConfig, "POST", req.URL())
+	if err != nil {
+		return fmt.Errorf("create executor: %w", err)
+	}
+
+	ws := &wsStream{conn: conn}
+	ws.lastActivity.Store(time.Now().UnixNano())
+
+	return executor.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdin:  ws,
+		Stdout: ws,
+		Stderr: ws,
+		Tty:    false,
+	})
+}
+
 // RunCommand executes a shell command in the VM pod and returns the combined stdout+stderr output.
 // The second return value is the command's exit code (0 on success).
 func (c *Client) RunCommand(ctx context.Context, namespace, name, command string) ([]byte, int, error) {
