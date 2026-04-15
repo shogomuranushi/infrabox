@@ -54,6 +54,13 @@ jobs:
           location: ${{ env.CLUSTER_ZONE }}
           project_id: ${{ secrets.GCP_PROJECT }}
 
+      - name: Patch ingress proxy-body-size for large file uploads
+        run: |
+          kubectl get ingress -n ${{ env.DEPLOY_NAMESPACE }} -o name | \
+            xargs -I{} kubectl annotate {} \
+              nginx.ingress.kubernetes.io/proxy-body-size=200m \
+              --overwrite -n ${{ env.DEPLOY_NAMESPACE }} 2>/dev/null || true
+
       - name: Rollout restart
         run: kubectl rollout restart deployment/infrabox-api -n ${{ env.DEPLOY_NAMESPACE }}
 
