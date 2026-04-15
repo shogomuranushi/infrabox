@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -145,6 +147,48 @@ func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 // This is done via WebSocket binary messages in the exec connection itself,
 // using the Kubernetes resize protocol (channel 4).
 // No separate endpoint needed — resize messages are sent inline.
+
+// RunCommand executes a shell command in a VM pod and returns its output.
+// POST /v1/vms/{name}/run
+// Request body: {"command": "..."}
+// Response: stdout+stderr with X-Exit-Code header.
+func (h *Handler) RunCommand(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	vm, err := h.db.GetVM(name, currentUser(r))
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if vm == nil {
+		jsonError(w, "VM not found", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Command) == "" {
+		jsonError(w, "command is required", http.StatusBadRequest)
+		return
+	}
+
+	vmNamespace := vm.Namespace
+	if vmNamespace == "" {
+		vmNamespace = h.cfg.VMNamespace
+	}
+
+	output, exitCode, err := h.k8s.RunCommand(r.Context(), vmNamespace, name, req.Command)
+	if err != nil {
+		log.Printf("ERROR: run command on %s: %v", name, err)
+		jsonError(w, "command execution failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("X-Exit-Code", fmt.Sprintf("%d", exitCode))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.WriteHeader(http.StatusOK)
+	w.Write(output) //nolint:errcheck
+}
 
 // WebSocket message protocol:
 // - Text messages: stdin data
