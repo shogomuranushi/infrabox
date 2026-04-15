@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -157,6 +158,50 @@ func (c *Client) CopyFromPod(ctx context.Context, namespace, name, srcPath strin
 		Stdout: writer,
 		Stderr: io.Discard,
 	})
+}
+
+// RunCommand executes a shell command in the VM pod and returns the combined stdout+stderr output.
+// The second return value is the command's exit code (0 on success).
+func (c *Client) RunCommand(ctx context.Context, namespace, name, command string) ([]byte, int, error) {
+	podName, err := c.findVMPod(ctx, namespace, name)
+	if err != nil {
+		return nil, 1, err
+	}
+
+	req := c.Clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: "vm",
+			Command:   []string{"bash", "-c", command},
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	executor, err := remotecommand.NewSPDYExecutor(c.RestConfig, "POST", req.URL())
+	if err != nil {
+		return nil, 1, fmt.Errorf("create executor: %w", err)
+	}
+
+	var buf bytes.Buffer
+	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &buf,
+		Stderr: &buf,
+	})
+
+	if err != nil {
+		// Extract exit code from K8s exec error if available.
+		type exitCoder interface{ ExitStatus() int }
+		if exitErr, ok := err.(exitCoder); ok {
+			return buf.Bytes(), exitErr.ExitStatus(), nil
+		}
+		return buf.Bytes(), 1, err
+	}
+	return buf.Bytes(), 0, nil
 }
 
 // findVMPod returns the name of the first running pod for the given VM.
