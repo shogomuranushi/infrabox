@@ -187,21 +187,26 @@ func (c *Client) RunCommand(ctx context.Context, namespace, name, command string
 		return nil, 1, fmt.Errorf("create executor: %w", err)
 	}
 
-	var buf bytes.Buffer
+	// Use separate buffers for stdout/stderr to avoid concurrent write races.
+	// StreamWithContext runs stdout and stderr in separate goroutines, so a shared
+	// bytes.Buffer would be subject to data races.
+	var stdoutBuf, stderrBuf bytes.Buffer
 	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &buf,
-		Stderr: &buf,
+		Stdout: &stdoutBuf,
+		Stderr: &stderrBuf,
 	})
 
+	// Merge after StreamWithContext returns (all goroutines have completed).
+	output := append(stdoutBuf.Bytes(), stderrBuf.Bytes()...)
+
 	if err != nil {
-		// Extract exit code from K8s exec error if available.
 		type exitCoder interface{ ExitStatus() int }
 		if exitErr, ok := err.(exitCoder); ok {
-			return buf.Bytes(), exitErr.ExitStatus(), nil
+			return output, exitErr.ExitStatus(), nil
 		}
-		return buf.Bytes(), 1, err
+		return output, 1, err
 	}
-	return buf.Bytes(), 0, nil
+	return output, 0, nil
 }
 
 // findVMPod returns the name of the first running pod for the given VM.
