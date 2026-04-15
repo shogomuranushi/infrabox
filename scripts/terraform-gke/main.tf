@@ -660,7 +660,10 @@ resource "kubernetes_ingress_v1" "infrabox_api" {
     name      = "infrabox-api-ingress"
     namespace = kubernetes_namespace.infrabox.metadata[0].name
     annotations = {
-      "cert-manager.io/cluster-issuer" = "letsencrypt"
+      "cert-manager.io/cluster-issuer"                    = "letsencrypt"
+      "nginx.ingress.kubernetes.io/proxy-body-size"        = "200m"
+      "nginx.ingress.kubernetes.io/proxy-read-timeout"     = "3600"
+      "nginx.ingress.kubernetes.io/proxy-send-timeout"     = "3600"
     }
   }
 
