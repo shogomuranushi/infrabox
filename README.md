@@ -53,6 +53,7 @@ Just Kubernetes + a handful of OSS components.
 | 📊 | Resource usage visualization (`ib top` / `ib admin top`) |
 | 📜 | First-boot setup script per user (`ib setup-script`) |
 | 🔄 | Auto-sync local files to every new VM (`ib sync`) |
+| 🔗 | Claude Code SSH integration (`ib ssh-proxy`) |
 | 📦 | `ib` CLI tool |
 
 ---
@@ -104,6 +105,24 @@ This means:
 - **No SSH keys to manage** — only an API key is needed
 - **No SSH port (2222) exposed** — all traffic goes through HTTPS (443)
 - **No sshpiper or SSH proxy** — fewer moving parts
+
+### Claude Code SSH Integration
+
+`ib ssh-proxy` acts as an SSH server on stdin/stdout and bridges connections to the WebSocket exec endpoint — allowing tools that require real SSH (like the Claude Code desktop app) to connect directly to VMs.
+
+```
+Claude Code ──[SSH protocol]──▶ ib ssh-proxy ──[WebSocket]──▶ VM pod
+```
+
+Add to `~/.ssh/config`:
+
+```
+Host infrabox-*
+  User ubuntu
+  ProxyCommand ib ssh-proxy %h
+```
+
+Then add an SSH connection in Claude Code with host `ubuntu@infrabox-<vmname>`.
 
 ### OSS Stack
 
@@ -180,6 +199,14 @@ ib sync add ~/.claude.json /home/ubuntu/.claude.json       # dst = exact file pa
 ib sync list                                               # List sync entries
 ib sync remove ~/.claude/settings.json                     # Remove an entry
 ib sync now my-app                                         # Sync to existing VM
+
+# Claude Code SSH integration
+# Add to ~/.ssh/config:
+#   Host infrabox-*
+#     User ubuntu
+#     ProxyCommand ib ssh-proxy %h
+# Then connect from Claude Code with: ubuntu@infrabox-<vmname>
+ib ssh-proxy <name>        # ProxyCommand bridge (spawned automatically by SSH)
 ```
 
 ---
@@ -249,7 +276,9 @@ ib admin top
 | `PATCH` | `/v1/vms/{name}` | Rename a VM |
 | `POST` | `/v1/vms/{name}/restart` | Restart a VM |
 | `PATCH` | `/v1/vms/{name}/auth` | Toggle oauth2 auth on/off |
-| `GET` | `/v1/vms/{name}/exec` | WebSocket shell session |
+| `GET` | `/v1/vms/{name}/exec` | WebSocket shell session (tmux) |
+| `GET` | `/v1/vms/{name}/exec-command?cmd=` | WebSocket exec for arbitrary command (no tmux) |
+| `POST` | `/v1/vms/{name}/run` | Run a shell command, return stdout+stderr |
 | `POST` | `/v1/vms/{name}/files?path=` | Upload files (tar stream) |
 | `GET` | `/v1/vms/{name}/files?path=` | Download files (tar stream) |
 | `GET` | `/v1/resources` | Get your resource usage |
