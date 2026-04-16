@@ -188,21 +188,24 @@ cron もベースイメージに含まれており、コンテナ起動時に自
 
 ### Claude Code の SSH リモート接続に対応
 
-`ib ssh-proxy` コマンドを追加しました。これにより、Claude Code の「SSH リモート」機能で InfraBox の VM に直接接続できるようになります。
+Claude Code のデスクトップアプリが大幅アップデートされ、SSH リモート接続機能が追加されました。ターミナルで使う AI アシスタントという立ち位置から、IDE そのものを獲りに行こうとしているように見えます。
 
-仕組みはシンプルで、`ib ssh-proxy` が SSH の ProxyCommand として動作し、SSH プロトコルを既存の WebSocket exec エンドポイントに橋渡しします。VM 側に sshd は不要です。
+この波に乗りたかった。InfraBox の VM に Claude Code デスクトップから直接接続できれば、「ローカルの IDE のフル機能を使いながら、実行環境は VM」という構成が作れます。
+
+ただ、普通の SSH で実装するとポート 22 を外部に開放することになります。社内環境で全 VM のポートを開けるのはセキュリティ的に避けたい。InfraBox がこれまで SSH ポートを不要にしてきたのと同じ理由です。
+
+そこで `ib ssh-proxy` コマンドを実装しました。SSH の ProxyCommand として動作し、SSH プロトコルを既存の WebSocket exec エンドポイントに橋渡しします。通信は HTTPS 443 番だけで完結し、VM 側に sshd も不要です。
 
 ```
-~/.ssh/config に1行追加するだけで使えます:
-
-  Host infrabox-*
-    User ubuntu
-    ProxyCommand ib ssh-proxy %h
+# ~/.ssh/config に追加するだけ
+Host infrabox-*
+  User ubuntu
+  ProxyCommand ib ssh-proxy %h
 ```
 
-この設定を入れると、Claude Code の SSH リモートから `ubuntu@infrabox-<vmname>` で接続できます。ローカルの IDE のフル機能を使いながら、実行環境は InfraBox の VM という構成が作れます。
+これで Claude Code デスクトップの SSH リモートから `ubuntu@infrabox-<vmname>` に接続できます。
 
-ポッドを再起動するたびに SSH の known_hosts が変わって警告が出る問題は、`~/.ib/ssh_host_key` に Ed25519 の永続ホストキーを持たせることで解決しています。
+もう一つハマったのが、Pod を再起動するたびに SSH のホストキーが変わって known_hosts の警告が出る問題です。`~/.ib/ssh_host_key` に Ed25519 の永続ホストキーを保存しておき、再起動後も同じキーを使い回すことで解決しました。
 
 ### ターミナルへの貼り付けでファイルを自動アップロード
 
