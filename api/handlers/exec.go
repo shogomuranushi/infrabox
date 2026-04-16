@@ -1,14 +1,24 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
+
+// tmuxSessionNameRE restricts session names to a safe character set so they
+// can be passed as a literal argument to tmux without risk of shell escaping
+// issues. tmux itself forbids '.' and ':' in session names. Leading '-' is
+// disallowed to avoid the value being mistaken for an option flag by tmux
+// commands the user may run later inside the shell.
+var tmuxSessionNameRE = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$`)
 
 var upgrader = websocket.Upgrader{
 	// CheckOrigin allows all origins because CLI clients don't send Origin headers.
@@ -36,6 +46,15 @@ func (h *Handler) ExecVM(w http.ResponseWriter, r *http.Request) {
 		vmNamespace = h.cfg.VMNamespace
 	}
 
+	session := r.URL.Query().Get("session")
+	if session == "" {
+		session = "main"
+	}
+	if !tmuxSessionNameRE.MatchString(session) {
+		jsonError(w, "invalid session name: must be 1-64 chars of [a-zA-Z0-9_-] and not start with '-'", http.StatusBadRequest)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ERROR: websocket upgrade for %s: %v", name, err)
@@ -43,7 +62,7 @@ func (h *Handler) ExecVM(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	if err := h.k8s.ExecPod(r.Context(), vmNamespace, name, conn); err != nil {
+	if err := h.k8s.ExecPod(r.Context(), vmNamespace, name, session, conn); err != nil {
 		log.Printf("ERROR: exec for %s: %v", name, err)
 		conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "session ended"))
@@ -128,6 +147,88 @@ func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 // This is done via WebSocket binary messages in the exec connection itself,
 // using the Kubernetes resize protocol (channel 4).
 // No separate endpoint needed — resize messages are sent inline.
+
+// ExecCommandVM handles WebSocket-based execution of a specific command in a VM pod.
+// Unlike ExecVM (which runs tmux), this runs the given command directly.
+// GET /v1/vms/{name}/exec-command?cmd=<shell-command>
+func (h *Handler) ExecCommandVM(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	vm, err := h.db.GetVM(name, currentUser(r))
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if vm == nil {
+		jsonError(w, "VM not found", http.StatusNotFound)
+		return
+	}
+
+	command := r.URL.Query().Get("cmd")
+	if strings.TrimSpace(command) == "" {
+		jsonError(w, "cmd query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	vmNamespace := vm.Namespace
+	if vmNamespace == "" {
+		vmNamespace = h.cfg.VMNamespace
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ERROR: websocket upgrade for exec-command %s: %v", name, err)
+		return
+	}
+	defer conn.Close()
+
+	if err := h.k8s.ExecCommand(r.Context(), vmNamespace, name, command, conn); err != nil {
+		log.Printf("ERROR: exec-command for %s: %v", name, err)
+		conn.WriteMessage(websocket.CloseMessage, //nolint:errcheck
+			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "command ended"))
+	}
+}
+
+// RunCommand executes a shell command in a VM pod and returns its output.
+// POST /v1/vms/{name}/run
+// Request body: {"command": "..."}
+// Response: stdout+stderr with X-Exit-Code header.
+func (h *Handler) RunCommand(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	vm, err := h.db.GetVM(name, currentUser(r))
+	if err != nil {
+		jsonError(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if vm == nil {
+		jsonError(w, "VM not found", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		Command string `json:"command"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Command) == "" {
+		jsonError(w, "command is required", http.StatusBadRequest)
+		return
+	}
+
+	vmNamespace := vm.Namespace
+	if vmNamespace == "" {
+		vmNamespace = h.cfg.VMNamespace
+	}
+
+	output, exitCode, err := h.k8s.RunCommand(r.Context(), vmNamespace, name, req.Command)
+	if err != nil {
+		log.Printf("ERROR: run command on %s: %v", name, err)
+		jsonError(w, "command execution failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("X-Exit-Code", fmt.Sprintf("%d", exitCode))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.WriteHeader(http.StatusOK)
+	w.Write(output) //nolint:errcheck
+}
 
 // WebSocket message protocol:
 // - Text messages: stdin data

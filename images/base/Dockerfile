@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo curl wget git vim nano \
     build-essential python3 python3-pip \
     nodejs npm jq unzip htop tmux \
-    ripgrep fd-find fzf zsh \
+    ripgrep fd-find fzf zsh cron \
   && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI
@@ -30,8 +30,8 @@ RUN (id ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu) \
   && usermod -s /bin/zsh ubuntu \
   && echo 'ubuntu ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-# Claude Code (native installer, installed as ubuntu so auto-update works)
-RUN su -s /bin/bash ubuntu -c "curl -fsSL https://claude.ai/install.sh | bash"
+# Claude Code
+RUN npm install -g @anthropic-ai/claude-code
 
 # Make ~/.local/bin available in login shells for all users
 RUN echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin.sh
@@ -39,5 +39,51 @@ RUN echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin.sh
 # rclone (Google Drive sync for context sharing)
 RUN curl https://rclone.org/install.sh | bash
 
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+WORKDIR /home/ubuntu
+USER ubuntu
+
+# Zsh configuration
+RUN cat >> ~/.zshrc <<'EOF'
+
+# History
+HISTFILE=~/.zsh_history
+HISTSIZE=10000
+SAVEHIST=10000
+setopt SHARE_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_SPACE
+
+# Completion
+autoload -Uz compinit && compinit
+
+# Git branch in prompt
+autoload -Uz vcs_info
+precmd_vcs_info() { vcs_info }
+precmd_functions+=( precmd_vcs_info )
+zstyle ':vcs_info:*' enable git
+zstyle ':vcs_info:git:*' formats ' %F{magenta}(%b)%f'
+setopt PROMPT_SUBST
+
+# Shorten k8s pod hostname (remove trailing hash/random suffix)
+_short_host() {
+  local h="${HOST}"
+  # Remove last two dash-separated segments (k8s pod suffix like -789d6d5dd4-xxwlx)
+  local s="${h%-*-*}"
+  echo "${s:-$h}"
+}
+SHORT_HOST="$(_short_host)"
+
+# Prompt: user@shorthost ~/path (branch) %
+PROMPT='%F{cyan}%n@${SHORT_HOST}%f:%F{yellow}%~%f${vcs_info_msg_0_} %# '
+
+# Locale (already set via ENV, but explicit here for subshells)
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+EOF
+
+# tmux configuration
+RUN printf 'set -g mouse on\nset -g default-terminal "xterm-256color"\nset -ga terminal-overrides ",xterm-256color:Tc"\n' > ~/.tmux.conf
+
 EXPOSE 8000
-CMD ["sleep", "infinity"]
+CMD ["sh", "-c", "sudo cron && sleep infinity"]

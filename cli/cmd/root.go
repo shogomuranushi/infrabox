@@ -14,9 +14,10 @@ var defaultEndpoint string
 var Version = "dev"
 
 type Config struct {
-	Endpoint string `yaml:"endpoint"`
-	APIKey   string `yaml:"api_key"`
-	AdminKey string `yaml:"admin_key,omitempty"`
+	Endpoint        string `yaml:"endpoint"`
+	APIKey          string `yaml:"api_key"`
+	AdminKey        string `yaml:"admin_key,omitempty"`
+	AutoUploadPaste bool   `yaml:"auto_upload_paste,omitempty"`
 }
 
 var cfg Config
@@ -34,7 +35,7 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(loadConfig, checkUpdateBackground)
-	rootCmd.AddCommand(createCmd, listCmd, deleteCmd, sshCmd, scpCmd, restartCmd, renameCmd, authCmd, initCmd, upgradeCmd, versionCmd, adminCmd, topCmd, setupScriptCmd, syncCmd)
+	rootCmd.AddCommand(createCmd, listCmd, deleteCmd, sshCmd, sshProxyCmd, scpCmd, restartCmd, renameCmd, authCmd, initCmd, upgradeCmd, versionCmd, adminCmd, topCmd, setupScriptCmd, syncCmd)
 }
 
 func loadConfig() {

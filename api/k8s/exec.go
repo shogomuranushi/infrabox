@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,7 +23,9 @@ const (
 )
 
 // ExecPod opens an interactive shell in the VM pod and bridges it to a WebSocket connection.
-func (c *Client) ExecPod(ctx context.Context, namespace, name string, conn *websocket.Conn) error {
+// session is the tmux session name to attach to (created if it does not exist).
+// The caller is responsible for validating the session name before passing it in.
+func (c *Client) ExecPod(ctx context.Context, namespace, name, session string, conn *websocket.Conn) error {
 	podName, err := c.findVMPod(ctx, namespace, name)
 	if err != nil {
 		return err
@@ -35,7 +38,11 @@ func (c *Client) ExecPod(ctx context.Context, namespace, name string, conn *webs
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "vm",
-			Command:   []string{"/bin/bash", "-l"},
+			Command: []string{
+				"sh", "-c",
+				`LANG=C.UTF-8 LC_ALL=C.UTF-8 exec tmux new-session -A -s "$1"`,
+				"--", session,
+			},
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
@@ -104,7 +111,7 @@ func (c *Client) CopyToPod(ctx context.Context, namespace, name, destPath string
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "vm",
-			Command:   []string{"bash", "-c", "mkdir -p " + destPath + " && tar xf - -C " + destPath},
+			Command:   []string{"sudo", "bash", "-c", "mkdir -p -- \"$1\" && tar xf - -C \"$1\"", "--", destPath},
 			Stdin:     true,
 			Stdout:    true,
 			Stderr:    true,
@@ -151,6 +158,94 @@ func (c *Client) CopyFromPod(ctx context.Context, namespace, name, srcPath strin
 		Stdout: writer,
 		Stderr: io.Discard,
 	})
+}
+
+// ExecCommand runs a shell command in the VM pod and bridges its stdin/stdout/stderr
+// to a WebSocket connection. Unlike ExecPod (which runs tmux), this runs the command
+// directly — intended for long-running proxy processes like the Claude Code remote server.
+func (c *Client) ExecCommand(ctx context.Context, namespace, name, command string, conn *websocket.Conn) error {
+	podName, err := c.findVMPod(ctx, namespace, name)
+	if err != nil {
+		return err
+	}
+
+	req := c.Clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: "vm",
+			Command:   []string{"bash", "-c", command},
+			Stdin:     true,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	executor, err := remotecommand.NewSPDYExecutor(c.RestConfig, "POST", req.URL())
+	if err != nil {
+		return fmt.Errorf("create executor: %w", err)
+	}
+
+	ws := &wsStream{conn: conn}
+	ws.lastActivity.Store(time.Now().UnixNano())
+
+	return executor.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdin:  ws,
+		Stdout: ws,
+		Stderr: ws,
+		Tty:    false,
+	})
+}
+
+// RunCommand executes a shell command in the VM pod and returns the combined stdout+stderr output.
+// The second return value is the command's exit code (0 on success).
+func (c *Client) RunCommand(ctx context.Context, namespace, name, command string) ([]byte, int, error) {
+	podName, err := c.findVMPod(ctx, namespace, name)
+	if err != nil {
+		return nil, 1, err
+	}
+
+	req := c.Clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: "vm",
+			Command:   []string{"bash", "-c", command},
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	executor, err := remotecommand.NewSPDYExecutor(c.RestConfig, "POST", req.URL())
+	if err != nil {
+		return nil, 1, fmt.Errorf("create executor: %w", err)
+	}
+
+	// Use separate buffers for stdout/stderr to avoid concurrent write races.
+	// StreamWithContext runs stdout and stderr in separate goroutines, so a shared
+	// bytes.Buffer would be subject to data races.
+	var stdoutBuf, stderrBuf bytes.Buffer
+	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdoutBuf,
+		Stderr: &stderrBuf,
+	})
+
+	// Merge after StreamWithContext returns (all goroutines have completed).
+	output := append(stdoutBuf.Bytes(), stderrBuf.Bytes()...)
+
+	if err != nil {
+		type exitCoder interface{ ExitStatus() int }
+		if exitErr, ok := err.(exitCoder); ok {
+			return output, exitErr.ExitStatus(), nil
+		}
+		return output, 1, err
+	}
+	return output, 0, nil
 }
 
 // findVMPod returns the name of the first running pod for the given VM.
@@ -237,10 +332,12 @@ func (ws *wsStream) sendClose(reason string) {
 }
 
 // Write sends data to the WebSocket (stdout/stderr to client).
+// BinaryMessage is used to avoid UTF-8 validation on multi-byte characters
+// (e.g. Japanese) that may be split across chunk boundaries.
 func (ws *wsStream) Write(p []byte) (int, error) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
-	if err := ws.conn.WriteMessage(websocket.TextMessage, p); err != nil {
+	if err := ws.conn.WriteMessage(websocket.BinaryMessage, p); err != nil {
 		return 0, err
 	}
 	return len(p), nil

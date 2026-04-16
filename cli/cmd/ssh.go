@@ -7,10 +7,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
+
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
+
+var sshSession string
 
 var sshCmd = &cobra.Command{
 	Use:   "ssh <name>",
@@ -19,8 +23,10 @@ var sshCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		mustConfig()
 		name := args[0]
+		autoUploadFlag, _ := cmd.Flags().GetBool("auto-upload")
+		autoUpload := autoUploadFlag || cfg.AutoUploadPaste
 
-		wsURL, err := buildExecURL(name)
+		wsURL, err := buildExecURL(name, sshSession)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
 			os.Exit(1)
@@ -39,6 +45,20 @@ var sshCmd = &cobra.Command{
 		}
 		defer conn.Close()
 
+		// Mutex-protected write to prevent concurrent write panics.
+		// gorilla/websocket requires that only one goroutine writes at a time.
+		var writeMu sync.Mutex
+		writeMsg := func(msgType int, data []byte) error {
+			writeMu.Lock()
+			defer writeMu.Unlock()
+			return conn.WriteMessage(msgType, data)
+		}
+
+		// Override the default pong handler so it uses the shared mutex.
+		conn.SetPingHandler(func(appData string) error {
+			return writeMsg(websocket.PongMessage, []byte(appData))
+		})
+
 		// Put terminal in raw mode
 		oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 		if err != nil {
@@ -48,10 +68,10 @@ var sshCmd = &cobra.Command{
 		defer term.Restore(int(os.Stdin.Fd()), oldState)
 
 		// Send initial terminal size
-		sendTermSize(conn)
+		sendTermSize(writeMsg)
 
 		// Handle terminal resize (platform-specific)
-		watchResize(conn)
+		watchResize(writeMsg)
 
 		// Read from WebSocket → stdout
 		done := make(chan struct{})
@@ -66,27 +86,46 @@ var sshCmd = &cobra.Command{
 			}
 		}()
 
+		// Stdin forwarder. If auto-upload is enabled, pipe stdin through the
+		// paste interceptor; otherwise forward raw chunks unchanged.
+		forwardToVM := func(chunk []byte) error {
+			return writeMsg(websocket.BinaryMessage, chunk)
+		}
+		var interceptor *pasteInterceptor
+		if autoUpload {
+			interceptor = newPasteInterceptor(name, forwardToVM)
+		}
+
 		// Read from stdin → WebSocket
 		go func() {
 			buf := make([]byte, 4096)
 			for {
 				n, err := os.Stdin.Read(buf)
 				if err != nil {
-					conn.WriteMessage(websocket.CloseMessage,
+					writeMsg(websocket.CloseMessage,
 						websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 					return
 				}
-				if err := conn.WriteMessage(websocket.TextMessage, buf[:n]); err != nil {
-					return
+				if interceptor != nil {
+					if ferr := interceptor.Feed(buf[:n]); ferr != nil {
+						return
+					}
+				} else {
+					if err := writeMsg(websocket.BinaryMessage, buf[:n]); err != nil {
+						return
+					}
 				}
 			}
 		}()
 
 		<-done
+		if interceptor != nil {
+			interceptor.Close()
+		}
 	},
 }
 
-func buildExecURL(name string) (string, error) {
+func buildExecURL(name, session string) (string, error) {
 	u, err := url.Parse(cfg.Endpoint)
 	if err != nil {
 		return "", fmt.Errorf("invalid endpoint: %w", err)
@@ -102,10 +141,20 @@ func buildExecURL(name string) (string, error) {
 	}
 
 	u.Path = fmt.Sprintf("/v1/vms/%s/exec", name)
+	if session != "" {
+		q := u.Query()
+		q.Set("session", session)
+		u.RawQuery = q.Encode()
+	}
 	return u.String(), nil
 }
 
-func sendTermSize(conn *websocket.Conn) {
+func init() {
+	sshCmd.Flags().StringVarP(&sshSession, "session", "s", "main", "tmux session name to attach to (created if it does not exist)")
+	sshCmd.Flags().Bool("auto-upload", false, "Auto-upload local file paths pasted into the session to the VM")
+}
+
+func sendTermSize(write func(int, []byte) error) {
 	w, h, err := term.GetSize(int(os.Stdin.Fd()))
 	if err != nil {
 		return
@@ -120,5 +169,5 @@ func sendTermSize(conn *websocket.Conn) {
 	msg := make([]byte, 1+len(data))
 	msg[0] = 0x04
 	copy(msg[1:], data)
-	conn.WriteMessage(websocket.BinaryMessage, msg)
+	write(websocket.BinaryMessage, msg) //nolint:errcheck
 }

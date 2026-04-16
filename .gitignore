@@ -17,6 +17,12 @@ vendor/
 .env.*
 !.env.example
 
+# Terraform — state and variable files contain secrets, never commit
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
 # OS
 .DS_Store
 Thumbs.db
