@@ -193,6 +193,9 @@ func (c *Client) createDeployment(ctx context.Context, cfg VMConfig) error {
 			Command: []string{"bash", "-c",
 				"chown ubuntu:ubuntu /home/ubuntu && chmod 750 /home/ubuntu",
 			},
+			SecurityContext: &corev1.SecurityContext{
+				RunAsUser: ptr(int64(0)),
+			},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: "home", MountPath: "/home/ubuntu"},
 			},
@@ -467,3 +470,5 @@ func (c *Client) UpdateVMAuth(ctx context.Context, namespace, name, authURL stri
 	_, err = c.Clientset.NetworkingV1().Ingresses(namespace).Update(ctx, ingress, metav1.UpdateOptions{})
 	return err
 }
+
+func ptr[T any](v T) *T { return &v }
