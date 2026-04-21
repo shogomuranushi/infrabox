@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo curl wget git vim nano \
     build-essential python3 python3-pip \
     nodejs npm jq unzip htop tmux \
-    ripgrep fd-find fzf zsh cron \
+    ripgrep fd-find fzf zsh cron nginx \
   && rm -rf /var/lib/apt/lists/*
 
 # GitHub CLI
