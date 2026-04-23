@@ -49,24 +49,34 @@ func checkUpdateBackground() {
 }
 
 // writableBinPath returns a path where the ib binary can be written without sudo.
-// Tries the current executable location first, then falls back to ~/.local/bin/ib.
+// Prefers ~/.local/bin/ib if it exists (set up by ib init), then falls back to
+// the current executable location if writable, then ~/.local/bin/ib as a last resort.
 func writableBinPath() (string, error) {
-	exe, err := os.Executable()
-	if err == nil {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	localIb := filepath.Join(home, ".local", "bin", "ib")
+
+	// Prefer ~/.local/bin/ib if already set up
+	if _, err := os.Stat(localIb); err == nil {
+		return localIb, nil
+	}
+
+	// Try current executable location
+	if exe, err := os.Executable(); err == nil {
 		if f, err := os.OpenFile(exe, os.O_WRONLY, 0); err == nil {
 			f.Close()
 			return exe, nil
 		}
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
+
+	// Fall back to ~/.local/bin/ib
 	dir := filepath.Join(home, ".local", "bin")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "ib"), nil
+	return localIb, nil
 }
 
 func shouldCheck() bool {
