@@ -151,7 +151,7 @@ func buildExecURL(name, session string) (string, error) {
 
 func init() {
 	sshCmd.Flags().StringVarP(&sshSession, "session", "s", "main", "tmux session name to attach to (created if it does not exist)")
-	sshCmd.Flags().Bool("auto-upload", false, "Auto-upload local file paths pasted into the session to the VM")
+	sshCmd.Flags().Bool("auto-upload", true, "Auto-upload local file paths pasted into the session to the VM (use --auto-upload=false to disable)")
 }
 
 func sendTermSize(write func(int, []byte) error) {
