@@ -570,7 +570,7 @@ resource "kubernetes_deployment" "infrabox_api" {
         container {
           name              = "api"
           image             = "ghcr.io/${var.ghcr_user}/infrabox-api:latest"
-          image_pull_policy = "IfNotPresent"
+          image_pull_policy = "Always"
 
           port { container_port = 8080 }
 
