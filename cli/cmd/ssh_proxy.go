@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pkg/sftp"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 )
@@ -90,15 +92,15 @@ func runSSHProxy(name string) error {
 
 	for newChan := range chans {
 		if newChan.ChannelType() != "session" {
+			logSSHProxy("rejecting channel type: %s", newChan.ChannelType())
 			newChan.Reject(ssh.UnknownChannelType, "unknown channel type")
 			continue
 		}
 		ch, requests, err := newChan.Accept()
 		if err != nil {
-			return nil
+			continue
 		}
-		dispatchSession(ch, requests, name)
-		return nil
+		go dispatchSession(ch, requests, name)
 	}
 	return nil
 }
@@ -139,7 +141,34 @@ func dispatchSession(ch ssh.Channel, requests <-chan *ssh.Request, vmName string
 			ssh.Unmarshal(req.Payload, &payload) //nolint:errcheck
 			logSSHProxy("exec: %q", payload.Command)
 			req.Reply(true, nil) //nolint:errcheck
-			runExecCommand(ch, vmName, payload.Command)
+			if isLongRunningExec(payload.Command) {
+				logSSHProxy("exec → interactive WebSocket bridge")
+				runCommandInteractive(ch, requests, vmName, payload.Command)
+			} else {
+				runExecCommand(ch, vmName, payload.Command)
+			}
+			return
+
+		case "subsystem":
+			var payload struct{ Name string }
+			ssh.Unmarshal(req.Payload, &payload) //nolint:errcheck
+			logSSHProxy("subsystem: %s", payload.Name)
+			if payload.Name == "sftp" {
+				req.Reply(true, nil) //nolint:errcheck
+				handler := &vmSFTPHandler{vmName: vmName}
+				server := sftp.NewRequestServer(ch, sftp.Handlers{
+					FileGet:  handler,
+					FilePut:  handler,
+					FileCmd:  handler,
+					FileList: handler,
+				})
+				if err := server.Serve(); err != nil && err != io.EOF {
+					logSSHProxy("sftp serve error: %v", err)
+				}
+				server.Close()
+			} else {
+				req.Reply(false, nil) //nolint:errcheck
+			}
 			return
 
 		default:
@@ -233,6 +262,7 @@ func runInteractiveShell(ch ssh.Channel, requests <-chan *ssh.Request, vmName st
 // runExecCommand runs a command in the VM via the HTTP API and writes output to the SSH channel.
 func runExecCommand(ch ssh.Channel, vmName, command string) {
 	apiURL := strings.TrimRight(cfg.Endpoint, "/") + "/v1/vms/" + vmName + "/run"
+	logSSHProxy("exec URL: %s", apiURL)
 
 	body, _ := json.Marshal(map[string]string{"command": command})
 	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(body))
@@ -244,7 +274,8 @@ func runExecCommand(ch ssh.Channel, vmName, command string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", cfg.APIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		logSSHProxy("exec HTTP error: %v", err)
 		ch.Write([]byte(err.Error() + "\n")) //nolint:errcheck
@@ -254,11 +285,139 @@ func runExecCommand(ch ssh.Channel, vmName, command string) {
 	defer resp.Body.Close()
 
 	output, _ := io.ReadAll(resp.Body)
-	logSSHProxy("exec output (%d bytes): %q", len(output), string(output))
+	logSSHProxy("exec status=%d output (%d bytes): %q", resp.StatusCode, len(output), string(output))
+
+	// If response is empty despite 200, retry once after a short delay.
+	if resp.StatusCode == http.StatusOK && len(output) == 0 {
+		logSSHProxy("empty response, retrying after 500ms...")
+		time.Sleep(500 * time.Millisecond)
+		resp.Body.Close()
+		body2, _ := json.Marshal(map[string]string{"command": command})
+		req2, _ := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(body2))
+		req2.Header.Set("Content-Type", "application/json")
+		req2.Header.Set("X-API-Key", cfg.APIKey)
+		if resp2, err2 := client.Do(req2); err2 == nil {
+			output, _ = io.ReadAll(resp2.Body)
+			resp2.Body.Close()
+			logSSHProxy("retry status=%d output (%d bytes): %q", resp2.StatusCode, len(output), string(output))
+		}
+	}
+
 	ch.Write(output) //nolint:errcheck
 
+	if resp.StatusCode != http.StatusOK {
+		sendExitStatus(ch, 1)
+		return
+	}
 	exitCode, _ := strconv.Atoi(resp.Header.Get("X-Exit-Code"))
 	sendExitStatus(ch, uint32(exitCode))
+}
+
+// isLongRunningExec returns true for commands that need bidirectional I/O
+// (e.g. the Claude Code remote server --connect which acts as an RPC proxy).
+func isLongRunningExec(command string) bool {
+	return strings.Contains(command, "--connect") && strings.Contains(command, "remote/server")
+}
+
+// runCommandInteractive bridges the SSH channel to the VM via WebSocket exec-command.
+// Used for long-running processes that need bidirectional stdin/stdout.
+func runCommandInteractive(ch ssh.Channel, requests <-chan *ssh.Request, vmName, command string) {
+	wsURL, err := buildExecCommandURL(vmName, command)
+	if err != nil {
+		logSSHProxy("exec-command build URL error: %v", err)
+		sendExitStatus(ch, 1)
+		return
+	}
+	dialer := &websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: false}}
+	wsConn, _, err := dialer.Dial(wsURL, http.Header{"X-API-Key": {cfg.APIKey}})
+	if err != nil {
+		logSSHProxy("exec-command WebSocket error: %v", err)
+		ch.Write([]byte(fmt.Sprintf("connection failed: %v\r\n", err))) //nolint:errcheck
+		sendExitStatus(ch, 1)
+		return
+	}
+	defer wsConn.Close()
+
+	var wsMu sync.Mutex
+	writeWS := func(msgType int, data []byte) error {
+		wsMu.Lock()
+		defer wsMu.Unlock()
+		return wsConn.WriteMessage(msgType, data)
+	}
+	wsConn.SetPingHandler(func(d string) error {
+		return writeWS(websocket.PongMessage, []byte(d))
+	})
+
+	// Drain remaining SSH requests
+	go func() {
+		for req := range requests {
+			if req.WantReply {
+				req.Reply(false, nil) //nolint:errcheck
+			}
+		}
+	}()
+
+	done := make(chan struct{})
+
+	// WebSocket → SSH channel
+	go func() {
+		defer close(done)
+		msgCount := 0
+		for {
+			msgType, msg, err := wsConn.ReadMessage()
+			if err != nil {
+				logSSHProxy("exec-command WS closed after %d msgs: %v", msgCount, err)
+				return
+			}
+			msgCount++
+			logSSHProxy("exec-command WS→SSH msg#%d type=%d len=%d", msgCount, msgType, len(msg))
+			if _, err := ch.Write(msg); err != nil {
+				logSSHProxy("exec-command SSH write error: %v", err)
+				return
+			}
+		}
+	}()
+
+	// SSH channel → WebSocket
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := ch.Read(buf)
+			if n > 0 {
+				writeWS(websocket.BinaryMessage, buf[:n]) //nolint:errcheck
+			}
+			if err != nil {
+				logSSHProxy("exec-command SSH read closed: %v", err)
+				writeWS(websocket.CloseMessage, //nolint:errcheck
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+				return
+			}
+		}
+	}()
+
+	<-done
+	logSSHProxy("exec-command done, sending exit-status 0")
+	sendExitStatus(ch, 0)
+}
+
+func buildExecCommandURL(vmName, command string) (string, error) {
+	u, err := url.Parse(cfg.Endpoint)
+	if err != nil {
+		return "", fmt.Errorf("invalid endpoint: %w", err)
+	}
+	switch u.Scheme {
+	case "https":
+		u.Scheme = "wss"
+	case "http":
+		u.Scheme = "ws"
+	default:
+		u.Scheme = "wss"
+	}
+	u.Path = fmt.Sprintf("/v1/vms/%s/exec-command", vmName)
+	q := u.Query()
+	q.Set("cmd", command)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 func sendExitStatus(ch ssh.Channel, code uint32) {
