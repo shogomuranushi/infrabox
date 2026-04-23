@@ -239,11 +239,16 @@ func runInteractiveShell(ch ssh.Channel, requests <-chan *ssh.Request, vmName st
 
 	// SSH channel → WebSocket (client keystrokes → VM)
 	go func() {
+		forwardToWS := func(data []byte) error {
+			return writeWS(websocket.BinaryMessage, data)
+		}
+		interceptor := newPasteInterceptor(vmName, forwardToWS)
+		defer interceptor.Close()
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := ch.Read(buf)
 			if n > 0 {
-				writeWS(websocket.BinaryMessage, buf[:n]) //nolint:errcheck
+				interceptor.Feed(buf[:n]) //nolint:errcheck
 			}
 			if err != nil {
 				writeWS(websocket.CloseMessage, //nolint:errcheck
