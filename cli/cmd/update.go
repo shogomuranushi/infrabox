@@ -21,6 +21,7 @@ type githubRelease struct {
 }
 
 // checkUpdateBackground runs an update check in the background at startup.
+// If a newer version is available, it downloads and replaces the binary automatically.
 // Skipped if a check was performed within the last 24 hours.
 func checkUpdateBackground() {
 	if !shouldCheck() {
@@ -32,11 +33,40 @@ func checkUpdateBackground() {
 			return
 		}
 		saveCheckTime()
-		if isNewer(latest, Version) {
-			fmt.Fprintf(os.Stderr, "\n[ib] New version available: %s → %s\n", Version, latest)
-			fmt.Fprintln(os.Stderr, "[ib] Run 'ib upgrade' to update.")
+		if !isNewer(latest, Version) {
+			return
 		}
+		binPath, err := writableBinPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\n[ib] New version available: %s → %s (run 'ib upgrade' to update)\n", Version, latest)
+			return
+		}
+		if err := downloadAndReplace(latest, binPath); err != nil {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "\n[ib] Auto-updated to %s\n", latest)
 	}()
+}
+
+// writableBinPath returns a path where the ib binary can be written without sudo.
+// Tries the current executable location first, then falls back to ~/.local/bin/ib.
+func writableBinPath() (string, error) {
+	exe, err := os.Executable()
+	if err == nil {
+		if f, err := os.OpenFile(exe, os.O_WRONLY, 0); err == nil {
+			f.Close()
+			return exe, nil
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "ib"), nil
 }
 
 func shouldCheck() bool {

@@ -30,9 +30,9 @@ var upgradeCmd = &cobra.Command{
 
 		fmt.Printf("Updating %s → %s\n", Version, latest)
 
-		binPath, err := os.Executable()
+		binPath, err := writableBinPath()
 		if err != nil {
-			return fmt.Errorf("cannot determine executable path: %w", err)
+			return fmt.Errorf("cannot determine writable path: %w", err)
 		}
 
 		if err := downloadAndReplace(latest, binPath); err != nil {
@@ -68,9 +68,6 @@ func downloadAndReplace(version, binPath string) error {
 	// write to temp file then atomically replace the existing binary
 	tmp := binPath + ".tmp"
 	if err := os.WriteFile(tmp, newBin, 0755); err != nil {
-		if os.IsPermission(err) {
-			return fmt.Errorf("permission denied — try: sudo ib upgrade")
-		}
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := os.Rename(tmp, binPath); err != nil {
