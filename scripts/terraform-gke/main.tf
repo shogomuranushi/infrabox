@@ -485,6 +485,11 @@ resource "kubernetes_cluster_role" "infrabox_api" {
     resources  = ["ingresses"]
     verbs      = ["create", "get", "list", "delete", "patch", "update"]
   }
+  rule {
+    api_groups = [""]
+    resources  = ["nodes"]
+    verbs      = ["get", "list"]
+  }
 }
 
 resource "kubernetes_cluster_role_binding" "infrabox_api" {
