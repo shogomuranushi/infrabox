@@ -45,6 +45,5 @@ var createCmd = &cobra.Command{
 		fmt.Printf("  Shell:     ib ssh %s\n", vm.Name)
 		fmt.Printf("  HTTPS URL: %s\n\n", vm.IngressURL)
 
-		applySync(name)
 	},
 }
